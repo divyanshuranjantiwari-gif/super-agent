@@ -1,0 +1,9 @@
+yfinance
+pandas
+numpy
+ta
+scikit-learn
+xgboost
+requests
+beautifulsoup4
+tqdm

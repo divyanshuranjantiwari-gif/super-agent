@@ -1,0 +1,10 @@
+yfinance
+nsepython
+xgboost
+scikit-learn
+pandas
+numpy
+jinja2
+requests
+scipy
+textblob

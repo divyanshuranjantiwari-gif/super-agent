@@ -1,0 +1,6 @@
+yfinance
+pandas
+ta
+beautifulsoup4
+textblob
+requests

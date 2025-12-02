@@ -1,0 +1,164 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Super Agent Alpha - Trading Dashboard</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #121212;
+                color: #e0e0e0;
+                margin: 0;
+                padding: 20px;
+            }
+            .container {
+                max_width: 1400px;
+                margin: 0 auto;
+                background-color: #1e1e1e;
+                padding: 20px;
+                border-radius: 10px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            }
+            h1 {
+                text-align: center;
+                color: #00d4ff;
+                margin-bottom: 10px;
+            }
+            .subtitle {
+                text-align: center;
+                color: #888;
+                margin-bottom: 30px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            th, td {
+                padding: 15px;
+                text-align: left;
+                border-bottom: 1px solid #333;
+            }
+            th {
+                background-color: #2c2c2c;
+                color: #fff;
+                font-weight: 600;
+            }
+            tr:hover {
+                background-color: #252525;
+            }
+            .buy-row {
+                border-left: 4px solid #28a745;
+            }
+            .sell-row {
+                border-left: 4px solid #dc3545;
+            }
+            .wait-row {
+                border-left: 4px solid #ffc107;
+            }
+            .ticker {
+                font-size: 1.1em;
+                font-weight: bold;
+                color: #fff;
+            }
+            .score {
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+            }
+            .trade-params {
+                font-size: 0.9em;
+                color: #ddd;
+            }
+            .model-detail {
+                font-size: 0.85em;
+                color: #aaa;
+                margin-bottom: 2px;
+            }
+            .footer {
+                text-align: center;
+                margin-top: 40px;
+                color: #555;
+                font-size: 0.8em;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>SUPER AGENT ALPHA</h1>
+            <div class="subtitle">Unified Intelligence from 3 Advanced Trading Models</div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Final Signal</th>
+                        <th>Super Score</th>
+                        <th>Trade Setup</th>
+                        <th>Model Breakdown</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr class="buy-row">
+            <td class="ticker">INFY.NS</td>
+            <td class="signal" style="color: #28a745; font-weight: bold;">BUY</td>
+            <td class="score">0.83</td>
+            <td class="trade-params">
+                <div><strong>Entry:</strong> 1561.00</div>
+                <div><strong>Target:</strong> 1587.43</div>
+                <div><strong>SL:</strong> 1547.79</div>
+                <div><strong>Type:</strong> INTRADAY</div>
+            </td>
+            <td class="details">
+                <div class="model-detail"><strong>HFM:</strong> BUY (0.70)</div>
+                <div class="model-detail"><strong>StockAI:</strong> BUY (0.90)</div>
+                <div class="model-detail"><strong>Quant:</strong> BUY (0.88)</div>
+            </td>
+        </tr>
+        
+        <tr class="buy-row">
+            <td class="ticker">TCS.BO</td>
+            <td class="signal" style="color: #28a745; font-weight: bold;">BUY</td>
+            <td class="score">0.29</td>
+            <td class="trade-params">
+                <div><strong>Entry:</strong> 3135.60</div>
+                <div><strong>Target:</strong> 3176.45</div>
+                <div><strong>SL:</strong> 3115.18</div>
+                <div><strong>Type:</strong> INTRADAY</div>
+            </td>
+            <td class="details">
+                <div class="model-detail"><strong>HFM:</strong> NEUTRAL (0.00)</div>
+                <div class="model-detail"><strong>StockAI:</strong> WAIT (0.72)</div>
+                <div class="model-detail"><strong>Quant:</strong> BUY (0.88)</div>
+            </td>
+        </tr>
+        
+        <tr class="wait-row">
+            <td class="ticker">RELIANCE.NS</td>
+            <td class="signal" style="color: #ffc107; font-weight: bold;">WAIT</td>
+            <td class="score">0.00</td>
+            <td class="trade-params">
+                <div><strong>Entry:</strong> 1546.30</div>
+                <div><strong>Target:</strong> 0.00</div>
+                <div><strong>SL:</strong> 0.00</div>
+                <div><strong>Type:</strong> N/A</div>
+            </td>
+            <td class="details">
+                <div class="model-detail"><strong>HFM:</strong> WAIT (0.00)</div>
+                <div class="model-detail"><strong>StockAI:</strong> WAIT (0.68)</div>
+                <div class="model-detail"><strong>Quant:</strong> WAIT (0.62)</div>
+            </td>
+        </tr>
+        
+                </tbody>
+            </table>
+            
+            <div class="footer">
+                Generated on 2025-12-03 01:11:54
+            </div>
+        </div>
+    </body>
+    </html>
+    
