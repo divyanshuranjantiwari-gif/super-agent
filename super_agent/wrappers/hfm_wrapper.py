@@ -155,7 +155,8 @@ def run_analysis(ticker):
             }
 
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        return {"error": f"{str(e)} | {traceback.format_exc()}"}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
