@@ -44,8 +44,11 @@ def run_wrapper(wrapper_name, ticker):
         lines = output.split('\n')
         json_line = lines[-1]
         return json.loads(json_line)
+    except subprocess.CalledProcessError as e:
+        # Capture stderr for debugging
+        return {"error": f"Subprocess Error: {e.stderr}", "details": {"raw_output": e.stdout}}
     except Exception as e:
-        return {"error": str(e), "details": {"raw_output": result.stdout if 'result' in locals() else ""}}
+        return {"error": str(e), "details": {"raw_output": ""}}
 
 def analyze_stock(ticker):
     print(f"Analyzing {ticker}...", end="\r")
