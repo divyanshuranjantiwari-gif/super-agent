@@ -168,8 +168,11 @@ def analyze_stock(ticker):
     # Add error info if any
     for k, v in results.items():
         if "error" in v:
-            swing_res['models'][k] = {"signal": "ERROR", "confidence": 0}
-            intraday_res['models'][k] = {"signal": "ERROR", "confidence": 0}
+            error_msg = v['error']
+            # Truncate to keep UI sane but show key info
+            short_err = f"ERR: {error_msg[:100]}" 
+            swing_res['models'][k] = {"signal": short_err, "confidence": 0}
+            intraday_res['models'][k] = {"signal": short_err, "confidence": 0}
 
     return swing_res, intraday_res
 
