@@ -5,28 +5,27 @@ import subprocess
 import concurrent.futures
 from reporting import generate_dual_reports
 
-# NIFTY 50 Universe
-NIFTY_50 = [
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
-    "HINDUNILVR.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS",
-    "LICI.NS", "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "HCLTECH.NS",
-    "MARUTI.NS", "TITAN.NS", "BAJFINANCE.NS", "SUNPHARMA.NS", "ULTRACEMCO.NS",
-    "TATAMOTORS.NS", "NTPC.NS", "POWERGRID.NS", "M&M.NS", "ONGC.NS",
-    "ADANIENT.NS", "ADANIPORTS.NS", "BAJAJFINSV.NS", "COALINDIA.NS", "JSWSTEEL.NS",
-    "TATASTEEL.NS", "HINDALCO.NS", "GRASIM.NS", "CIPLA.NS", "TECHM.NS",
-    "WIPRO.NS", "DRREDDY.NS", "SBILIFE.NS", "BRITANNIA.NS", "INDUSINDBK.NS",
-    "TATACONSUM.NS", "DIVISLAB.NS", "EICHERMOT.NS", "NESTLEIND.NS", "BPCL.NS",
-    "HEROMOTOCO.NS", "APOLLOHOSP.NS", "UPL.NS"
-]
+import requests
+import io
+import pandas as pd
 
-SENSEX_30 = [
-    "RELIANCE.BO", "TCS.BO", "HDFCBANK.BO", "INFY.BO", "ICICIBANK.BO",
-    "HINDUNILVR.BO", "SBIN.BO", "BHARTIARTL.BO", "ITC.BO", "KOTAKBANK.BO",
-    "LT.BO", "AXISBANK.BO", "ASIANPAINT.BO", "HCLTECH.BO", "MARUTI.BO",
-    "TITAN.BO", "BAJFINANCE.BO", "SUNPHARMA.BO", "ULTRACEMCO.BO", "TATAMOTORS.BO",
-    "NTPC.BO", "POWERGRID.BO", "M&M.BO", "TATASTEEL.BO", "JSWSTEEL.BO",
-    "BAJAJFINSV.BO", "INDUSINDBK.BO", "TECHM.BO", "WIPRO.BO", "NESTLEIND.BO"
-]
+def get_nifty500():
+    try:
+        print("Fetching NIFTY 500 list from NSE...")
+        url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            csv_content = response.content.decode('utf-8')
+            df = pd.read_csv(io.StringIO(csv_content))
+            symbols = df['Symbol'].tolist()
+            return [s + ".NS" for s in symbols]
+        else:
+            print(f"Failed to fetch NIFTY 500: {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"Error fetching NIFTY 500: {e}")
+        return []
 
 WRAPPER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wrappers")
 
@@ -184,10 +183,14 @@ def main():
     print(f"Wrapper Directory: {WRAPPER_DIR}")
     
     # Limit for testing
-    # tickers = NIFTY_50[:3] 
-    # Combine Universes (Set to remove duplicates if any, though suffixes differ)
-    tickers = list(set(NIFTY_50 + SENSEX_30))
-    # tickers = ["RELIANCE.NS", "TCS.BO", "EICHERMOT.NS"] # Mixed subset for testing
+    # tickers = ["RELIANCE.NS", "TCS.NS"] 
+    
+    # Fetch NIFTY 500
+    tickers = get_nifty500()
+    
+    if not tickers:
+        print("Fallback to hardcoded list (Critical Error)")
+        tickers = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"] # Minimal fallback
     
     print(f"Starting analysis for {len(tickers)} stocks...")
     
