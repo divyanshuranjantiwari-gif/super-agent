@@ -4,6 +4,8 @@ on:
   repository_dispatch:
     types: [run_analysis]
   workflow_dispatch: # Manual trigger button
+  schedule:
+    - cron: '0 5 * * *' # 10:30 AM IST (05:00 UTC)
 
 permissions:
   contents: write
