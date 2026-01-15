@@ -5,7 +5,7 @@ on:
     types: [run_analysis]
   workflow_dispatch: # Manual trigger button
   schedule:
-    - cron: '0 5 * * *' # 10:30 AM IST (05:00 UTC)
+    - cron: '30 4 * * *' # 10:00 AM IST (04:30 UTC)
 
 permissions:
   contents: write
