@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 from utils import logger
 
-def get_technical_indicators(ticker):
+def get_technical_indicators(ticker, df=None):
     """
     Calculates technical indicators for 1-Day timeframe using 'ta' library.
     Returns a score (0-10) and a dictionary of signals.
@@ -12,8 +12,9 @@ def get_technical_indicators(ticker):
     signals = {}
     
     try:
-        # Fetch 1 year of data to ensure enough for 200 SMA
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        if df is None:
+            # Fetch 1 year of data to ensure enough for 200 SMA
+            df = yf.download(ticker, period="1y", interval="1d", progress=False)
         
         if df.empty or len(df) < 200:
             return 0, {"Error": "Insufficient Data"}
@@ -85,6 +86,17 @@ def get_technical_indicators(ticker):
         indicator_atr = ta.volatility.AverageTrueRange(high=high_series, low=low_series, close=close_series, window=14)
         atr = indicator_atr.average_true_range()
         signals['ATR'] = atr.iloc[-1]
+        
+        # 5. ADX (Trend Strength)
+        indicator_adx = ta.trend.ADXIndicator(high=high_series, low=low_series, close=close_series, window=14)
+        signals['ADX'] = indicator_adx.adx().iloc[-1]
+        
+        # 6. RVOL (Institutional Volume)
+        vol_series = df['Volume']
+        vol_avg = vol_series.rolling(window=20).mean()
+        # Handle div by zero if vol_avg is 0
+        rvol_series = vol_series / vol_avg.replace(0, 1)
+        signals['RVOL'] = rvol_series.iloc[-1]
 
     except Exception as e:
         logger.error(f"Technical check failed for {ticker}: {e}")

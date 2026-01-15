@@ -43,6 +43,26 @@ def calculate_atr(high, low, close, period=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(window=period).mean()
 
+def calculate_adx(high, low, close, period=14):
+    plus_dm = high.diff()
+    minus_dm = low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    
+    tr1 = pd.DataFrame(high - low)
+    tr2 = pd.DataFrame(abs(high - close.shift(1)))
+    tr3 = pd.DataFrame(abs(low - close.shift(1)))
+    frames = [tr1, tr2, tr3]
+    tr = pd.concat(frames, axis=1, join='inner').max(axis=1)
+    atr = tr.rolling(period).mean()
+    
+    plus_di = 100 * (plus_dm.ewm(alpha = 1/period).mean() / atr)
+    minus_di = abs(100 * (minus_dm.ewm(alpha = 1/period).mean() / atr))
+    dx = (abs(plus_di - minus_di) / abs(plus_di + minus_di)) * 100
+    adx = ((dx.shift(1) * (period - 1)) + dx) / period
+    adx_smooth = adx.ewm(alpha = 1/period).mean()
+    return adx_smooth
+
 def run_analysis(ticker):
     try:
         with suppress_stdout():
@@ -68,51 +88,89 @@ def run_analysis(ticker):
             # Volume
             df['VOL_SMA_20'] = df['Volume'].rolling(window=20).mean()
             df['ATR'] = calculate_atr(df['High'], df['Low'], df['Close'], 14)
+            df['ADX'] = calculate_adx(df['High'], df['Low'], df['Close'], 14)
             
-            # Get Latest Data
-            latest = df.iloc[-1]
-            price = latest['Close']
-            ema_50 = latest['EMA_50']
-            ema_200 = latest['EMA_200']
-            rsi = latest['RSI']
-            macd_line = latest['MACD']
-            macd_signal = latest['MACD_SIGNAL']
-            vol = latest['Volume']
-            vol_avg = latest['VOL_SMA_20']
-            atr = latest['ATR']
-            
-            # Handle NaN (e.g. if not enough data for indicators)
-            if np.isnan(atr): atr = price * 0.02
-            if np.isnan(rsi): rsi = 50
-            
-            # --- SCORING LOGIC ---
-            
-            # 1. Trend (40%)
-            trend_score = 0
-            if price > ema_50 > ema_200:
-                trend_score = 1 # Bullish
-            elif price < ema_50 < ema_200:
-                trend_score = -1 # Bearish
+            # Helper for analysis
+            def analyze_slice(df_slice):
+                if df_slice is None or df_slice.empty: return None
+                latest = df_slice.iloc[-1]
+                price = latest['Close']
+                ema_50 = latest['EMA_50']
+                ema_200 = latest['EMA_200']
+                rsi = latest['RSI']
+                macd_line = latest['MACD']
+                macd_signal = latest['MACD_SIGNAL']
+                vol = latest['Volume']
+                vol_avg = latest['VOL_SMA_20']
+                atr = latest['ATR']
+                adx = latest['ADX']
                 
-            # 2. Momentum (30%)
-            mom_score = 0
-            if rsi > 55 and macd_line > macd_signal:
-                mom_score = 1 # Bullish
-            elif rsi < 45 and macd_line < macd_signal:
-                mom_score = -1 # Bearish
+                if np.isnan(atr): atr = price * 0.02
+                if np.isnan(rsi): rsi = 50
                 
-            # 3. Volume Confirmation (30% Impact)
-            base_score = (trend_score * 0.5) + (mom_score * 0.3)
-            
-            vol_boost = 0
-            if vol > vol_avg:
-                if base_score > 0: vol_boost = 0.2
-                elif base_score < 0: vol_boost = -0.2
+                # Scoring
+                trend_score = 0
+                if price > ema_50 > ema_200: trend_score = 1
+                elif price < ema_50 < ema_200: trend_score = -1
                 
-            final_score = base_score + vol_boost
+                mom_score = 0
+                if rsi > 55 and macd_line > macd_signal: mom_score = 1
+                elif rsi < 45 and macd_line < macd_signal: mom_score = -1
+                
+                base_score = (trend_score * 0.5) + (mom_score * 0.3)
+                
+                vol_boost = 0
+                if vol > vol_avg:
+                    if base_score > 0: vol_boost = 0.2
+                    elif base_score < 0: vol_boost = -0.2
+                
+                final_score = base_score + vol_boost
+                final_score = max(min(final_score, 1.0), -1.0)
+                
+                # Rvol
+                rvol = vol / vol_avg if vol_avg > 0 else 1.0
+                
+                return {
+                    "score": final_score,
+                    "trend_score": trend_score,
+                    "mom_score": mom_score,
+                    "vol_boost": vol_boost,
+                    "price": price,
+                    "atr": atr,
+                    "adx": adx,
+                    "rvol": rvol
+                }
+
+            # Generate History
+            history = []
+            for i in range(3):
+                if len(df) < 50 + i: break
+                
+                slice_df = df if i == 0 else df[:-i]
+                res = analyze_slice(slice_df)
+                if not res: continue
+                
+                signal = "WAIT"
+                if res['score'] >= 0.6: signal = "STRONG BUY"
+                elif res['score'] <= -0.6: signal = "STRONG SELL"
+                elif res['score'] > 0.2: signal = "BUY"
+                elif res['score'] < -0.2: signal = "SELL"
+                
+                history.append({
+                    "date": str(slice_df.index[-1]) if hasattr(slice_df.index, 'date') else f"T-{i}",
+                    "signal": signal,
+                    "confidence": abs(res['score'])
+                })
+
+            # Current Analysis (T)
+            current_res = analyze_slice(df)
+            if not current_res: return {"error": "Analysis failed"}
             
-            # Cap score
-            final_score = max(min(final_score, 1.0), -1.0)
+            final_score = current_res['score']
+            price = current_res['price']
+            atr = current_res['atr']
+            adx = current_res['adx']
+            rvol = current_res['rvol']
             
             # --- SIGNAL GENERATION ---
             signal = "WAIT"
@@ -163,10 +221,13 @@ def run_analysis(ticker):
                 "model_name": "Apex Logic",
                 "swing": swing_data,
                 "intraday": intraday_data,
+                "history": history,
                 "details": {
-                    "trend_score": trend_score,
-                    "mom_score": mom_score,
-                    "vol_boost": vol_boost
+                    "trend_score": current_res['trend_score'],
+                    "mom_score": current_res['mom_score'],
+                    "vol_boost": current_res['vol_boost'],
+                    "adx": round(float(adx), 2) if not np.isnan(adx) else 0.0,
+                    "rvol": round(float(rvol), 2)
                 }
             }
 

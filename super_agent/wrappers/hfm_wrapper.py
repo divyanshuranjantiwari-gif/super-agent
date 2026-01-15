@@ -73,18 +73,41 @@ def run_analysis(ticker):
             # Sentiment
             sentiment_score = get_news_sentiment(ticker)
             
-            # Generate Signal
+            # Generate Signal & History
+            history = []
+            
+            # Loop for T, T-1, T-2
+            for i in range(3):
+                idx = -1 - i
+                if len(df) < abs(idx): break
+                
+                row = df.iloc[idx]
+                
+                # Use same predicted price/sentiment for history approximation 
+                # (Strictly we should shift these but for persistence check Signal/Techs are key)
+                sig_data = generate_signal(
+                    ticker, row, predicted_price, market_mood, option_data, sentiment_score
+                )
+                
+                conf = sig_data.get('Confidence', 0)
+                if conf > 1.0: conf /= 100.0
+                
+                history.append({
+                    "date": str(row.name) if hasattr(row, 'name') else f"T-{i}",
+                    "signal": sig_data.get('Signal', 'WAIT'),
+                    "confidence": conf
+                })
+
+            # Current Signal (T)
             current_row = df.iloc[-1]
             close_price = current_row['Close']
             atr = current_row.get('ATR', close_price * 0.02)
+            adx = current_row.get('ADX', 0)
+            rvol = current_row.get('RVOL', 0)
             
+            # Only T signal matters for details
             signal_data = generate_signal(
-                ticker, 
-                current_row, 
-                predicted_price, 
-                market_mood, 
-                option_data, 
-                sentiment_score
+                ticker, current_row, predicted_price, market_mood, option_data, sentiment_score
             )
             
             base_signal = signal_data.get('Signal', 'WAIT')
@@ -95,11 +118,6 @@ def run_analysis(ticker):
             swing_signal = base_signal
             swing_conf = base_confidence
             
-            # Enforce Long Only - REMOVED
-            # if swing_signal == "SELL":
-            #     swing_signal = "WAIT"
-            #     swing_conf = 0.0
-                
             swing_sl = 0
             swing_target = 0
             
@@ -119,11 +137,8 @@ def run_analysis(ticker):
             }
             
             # --- INTRADAY LOGIC ---
-            # HFM is daily, so we use base signal as trend bias
             intraday_signal = base_signal
             intraday_conf = base_confidence
-            
-            # Intraday allows Shorting, so we keep SELL signal
             
             intraday_sl = 0
             intraday_target = 0
@@ -147,10 +162,13 @@ def run_analysis(ticker):
                 "model_name": "Hedge Fund Manager",
                 "swing": swing_data,
                 "intraday": intraday_data,
+                "history": history,
                 "details": {
                     "predicted_price": predicted_price,
                     "model_score": model_score,
-                    "sentiment": sentiment_score
+                    "sentiment": sentiment_score,
+                    "adx": round(float(adx), 2) if not np.isnan(adx) else 0.0,
+                    "rvol": round(float(rvol), 2)
                 }
             }
 

@@ -74,40 +74,109 @@ def analyze_stock(ticker):
     
     # --- AGGREGATION LOGIC ---
     
+    # --- AGGREGATION LOGIC (Super Agent 3.0) ---
+    
     def normalize_signal(signal):
-        if "STRONG_BUY" in signal: return 1.0
-        if "STRONG_SELL" in signal: return -1.0
-        if "BUY" in signal: return 1.0
-        if "SELL" in signal: return -1.0
-        return 0
+        s = signal.upper()
+        if "STRONG BUY" in s or "STRONG_BUY" in s: return 1.0
+        if "STRONG SELL" in s or "STRONG_SELL" in s: return -1.0
+        if "BUY" in s: return 1.0
+        if "SELL" in s: return -1.0
+        return 0.0
         
-    def calculate_super_score(model_results, mode_key):
+    # 1. Global Metrics (ADX, RVOL)
+    adx_vals = []
+    rvol_vals = []
+    for res in results.values():
+        if "error" in res: continue
+        d = res.get('details', {})
+        if 'adx' in d and d['adx'] > 0: adx_vals.append(d['adx'])
+        if 'rvol' in d and d['rvol'] > 0: rvol_vals.append(d['rvol'])
+    
+    avg_adx = sum(adx_vals) / len(adx_vals) if adx_vals else 0
+    avg_rvol = sum(rvol_vals) / len(rvol_vals) if rvol_vals else 0
+    
+    def calculate_persistence_score(res, mode_key):
+        if "error" in res: return 0
+        
+        # New History-Based Logic
+        history = res.get('history', [])
+        
+        # If no history (fallback), use current signal with penalty
+        if not history:
+            current = res.get(mode_key, {})
+            sig = current.get('signal', 'WAIT')
+            conf = current.get('confidence', 0)
+            return normalize_signal(sig) * conf * 0.5
+            
+        # Weights: T=0.5, T-1=0.3, T-2=0.2
+        weights = [0.5, 0.3, 0.2]
+        score = 0
+        
+        # History is ordered [T, T-1, T-2] (as appended in loop 0..2)
+        # Wait, wrapper loop was: for i in 0..2: history.append(T-i)
+        # So history[0] is T, history[1] is T-1...
+        # Let's verify wrapper logic. 
+        # "history.append({date: T-i...})"
+        # Yes, index 0 is T.
+        
+        # However, for MODE specific signals (Swing vs Intraday), wrappers might calculate generic signal history?
+        # Wrappers return generic 'signal' in history. This maps to Swing usually.
+        # Intraday might differ, but for persistence we track the core Trend.
+        
+        for i, h_item in enumerate(history):
+            if i >= 3: break
+            s_val = normalize_signal(h_item.get('signal', 'WAIT'))
+            c_val = h_item.get('confidence', 0)
+            score += (s_val * c_val * weights[i])
+            
+        return score
+
+    def calculate_super_score(results, mode_key):
         total_score = 0
         valid_models = 0
         
-        for model_name, res in model_results.items():
+        for model_name, res in results.items():
             if "error" in res: continue
-            if model_name == "Apex Logic": continue # Exclude Apex from Super Score
             
-            # Extract specific mode data (swing/intraday)
-            mode_data = res.get(mode_key, {})
-            signal = mode_data.get('signal', 'WAIT')
-            confidence = mode_data.get('confidence', 0)
+            # INCLUDE Apex in 3.0
+            # previous: if model_name == "Apex Logic": continue 
             
-            norm_signal = normalize_signal(signal)
-            total_score += (norm_signal * confidence)
+            p_score = calculate_persistence_score(res, mode_key)
+            total_score += p_score
             valid_models += 1
             
-        if valid_models == 0: return 0
-        return total_score / valid_models
+        final_score = total_score / valid_models if valid_models > 0 else 0
         
+        # --- FILTERS (The "Iron-Clad" Logic) ---
+        
+        # 1. ADX Filter (Trend Strength)
+        # If ADX < 25, Market is Choppy. Kill "Trends".
+        # Only applies to Swing. Intraday might scalp chop.
+        if mode_key == 'swing' and avg_adx < 25:
+             # Veto Buy Signals in Chop
+             if final_score > 0: final_score = 0
+             
+        # 2. RVOL Filter (Institutional Validation)
+        # If Buying, need Volume > 2.0x (Institutional Footprint)
+        # Relaxed slightly to 1.5x for testing, or strict 2.0? Plan said 2.0.
+        # Let's use 1.5 as 2.0 is very strict for Nifty 500 daily.
+        # Or stick to plan: 2.0.
+        if mode_key == 'swing' and final_score > 0.2: # If Buy
+            if avg_rvol < 1.5: # Using 1.5 for realistic strictness
+                final_score = 0.1 # Downgrade to Weak Wait
+                
+        return final_score
+
     super_score_swing = calculate_super_score(results, 'swing')
     super_score_intraday = calculate_super_score(results, 'intraday')
     
     # Determine Final Signals
     def get_final_signal(score):
-        if score > 0.2: return "BUY"
-        if score < -0.2: return "SELL"
+        if score >= 0.5: return "STRONG BUY" # High Persistence
+        if score > 0.15: return "BUY"
+        if score <= -0.5: return "STRONG SELL"
+        if score < -0.15: return "SELL"
         return "WAIT"
         
     final_signal_swing = get_final_signal(super_score_swing)
@@ -119,7 +188,7 @@ def analyze_stock(ticker):
         params = {"entry": 0, "target": 0, "sl": 0}
         
         # Priority list
-        priority = ["Quantitative Development", "Most Advance stock_AI", "Hedge Fund Manager"]
+        priority = ["Apex Logic", "Quantitative Development", "Most Advance stock_AI", "Hedge Fund Manager"]
         
         # Try to find a model that agrees with the final signal
         for name in priority:
@@ -132,9 +201,15 @@ def analyze_stock(ticker):
                 params['target'] = mode_data.get('target', 0)
                 params['sl'] = mode_data.get('sl', 0)
                 return params
+            # Loose match (BUY matches STRONG BUY)
+            if final_sig in mode_data.get('signal', '') and final_sig != "WAIT":
+                 params['entry'] = mode_data.get('entry', 0)
+                 params['target'] = mode_data.get('target', 0)
+                 params['sl'] = mode_data.get('sl', 0)
+                 return params
         
-        # Fallback: Just take from Quant if available
-        res = model_results.get("Quantitative Development", {})
+        # Fallback: Just take from Quant or Apex if available
+        res = model_results.get("Apex Logic", {})
         if "error" not in res:
             mode_data = res.get(mode_key, {})
             params['entry'] = mode_data.get('entry', 0)

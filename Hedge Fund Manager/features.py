@@ -2,6 +2,30 @@ import pandas as pd
 import ta
 import numpy as np
 
+def calculate_adx(df, window=14):
+    """
+    Calculates Average Directional Index (ADX) to determine trend strength.
+    """
+    if df.empty or 'High' not in df.columns or 'Low' not in df.columns or 'Close' not in df.columns:
+        return df
+    
+    # ta.trend.ADXIndicator
+    adx_indicator = ta.trend.ADXIndicator(high=df['High'], low=df['Low'], close=df['Close'], window=window)
+    df['ADX'] = adx_indicator.adx()
+    return df
+
+def calculate_rvol(df, window=20):
+    """
+    Calculates Relative Volume (RVOL) = Current Volume / Average Volume.
+    """
+    if df.empty or 'Volume' not in df.columns:
+        return df
+        
+    df['Vol_Avg'] = df['Volume'].rolling(window=window).mean()
+    # Avoid division by zero
+    df['RVOL'] = df['Volume'] / df['Vol_Avg'].replace(0, 1)
+    return df
+
 def add_technical_indicators(df):
     """
     Adds technical indicators to the dataframe.
@@ -62,6 +86,12 @@ def add_technical_indicators(df):
     
     # 7. EMA 20 for Trend
     df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
+    
+    # 8. ADX (Trend Strength)
+    df = calculate_adx(df)
+    
+    # 9. RVOL (Institutional Volume)
+    df = calculate_rvol(df)
     
     return df
 

@@ -3,6 +3,7 @@ import os
 import json
 import argparse
 import contextlib
+import numpy as np
 
 @contextlib.contextmanager
 def suppress_stdout():
@@ -41,29 +42,73 @@ def run_analysis(ticker):
             if df is None or df.empty:
                 return {"error": "No data"}
             
-            # Fundamental Analysis
-            fund_data = fund_engine.analyze(ticker)
+            # Helper for analysis
+            def analyze_slice(df_slice):
+                # Data check
+                if df_slice is None or df_slice.empty: return None
+                
+                # Fundamental Analysis (Static)
+                fund_data = fund_engine.analyze(ticker)
+                
+                # Technical Analysis (Dynamic)
+                tech_data = tech_engine.analyze(ticker, df_slice)
+                
+                stock_data = {
+                    "symbol": ticker,
+                    "technical_score": tech_data.get('score', 0),
+                    "fundamental_score": fund_data.get('score', 0),
+                    "technical_signals": tech_data.get('signals', {}),
+                    "fundamental_metrics": fund_data.get('metrics', {}),
+                    "latest_price": tech_data.get('latest_price', 0)
+                }
+                
+                # Calculate Confidence Score
+                tech_score = stock_data['technical_score']
+                fund_score = stock_data['fundamental_score']
+                confidence_score = (tech_score * 0.6) + (fund_score * 0.4)
+                stock_data['confidence_score'] = confidence_score
+                
+                # Generate Signal
+                signal_data = strat_engine.generate_signals(stock_data)
+                
+                return {
+                    "stock_data": stock_data,
+                    "signal_data": signal_data
+                }
+
+            # Generate History
+            history = []
+            for i in range(3):
+                if len(df) < 50 + i: break # Ensure enough data
+                
+                slice_df = df if i == 0 else df[:-i]
+                res = analyze_slice(slice_df)
+                if not res: continue
+                
+                sig_d = res['signal_data']
+                stk_d = res['stock_data']
+                
+                base_signal = sig_d.get('recommendation', 'WAIT')
+                if 'BUY' in base_signal.upper(): base_signal = 'BUY'
+                elif 'SELL' in base_signal.upper(): base_signal = 'SELL'
+                else: base_signal = 'WAIT'
+                
+                conf = sig_d.get('confidence_score', 0.0)
+                if conf > 1.0: conf /= 100.0
+                
+                history.append({
+                    "date": str(slice_df.index[-1]) if hasattr(slice_df.index, 'date') else f"T-{i}",
+                    "signal": base_signal,
+                    "confidence": conf
+                })
+
+            # Current Analysis (T)
+            current_res = analyze_slice(df)
+            if not current_res: return {"error": "Analysis failed"}
             
-            # Technical Analysis
-            tech_data = tech_engine.analyze(ticker, df)
-            
-            stock_data = {
-                "symbol": ticker,
-                "technical_score": tech_data.get('score', 0),
-                "fundamental_score": fund_data.get('score', 0),
-                "technical_signals": tech_data.get('signals', {}),
-                "fundamental_metrics": fund_data.get('metrics', {}),
-                "latest_price": tech_data.get('latest_price', 0)
-            }
-            
-            # Calculate Confidence Score
-            tech_score = stock_data['technical_score']
-            fund_score = stock_data['fundamental_score']
-            confidence_score = (tech_score * 0.6) + (fund_score * 0.4)
-            stock_data['confidence_score'] = confidence_score
-            
-            # Generate Signal
-            signal_data = strat_engine.generate_signals(stock_data)
+            stock_data = current_res['stock_data']
+            signal_data = current_res['signal_data']
+            tech_s = stock_data['technical_signals']
             
             base_signal = signal_data.get('recommendation', 'WAIT')
             if 'BUY' in base_signal.upper(): base_signal = 'BUY'
@@ -74,17 +119,14 @@ def run_analysis(ticker):
             if base_conf > 1.0: base_conf /= 100.0
             
             entry_price = signal_data.get('entry', {}).get('price', 0)
-            atr = stock_data['technical_signals'].get('atr', entry_price * 0.02)
+            atr = tech_s.get('atr', entry_price * 0.02)
+            adx = tech_s.get('adx', 0)
+            rvol = tech_s.get('rvol', 0)
             
             # --- SWING LOGIC ---
             swing_signal = base_signal
             swing_conf = base_conf
             
-            # Enforce Long Only - REMOVED
-            # if swing_signal == "SELL":
-            #     swing_signal = "WAIT"
-            #     swing_conf = 0.0
-                
             swing_sl = 0
             swing_target = 0
             
@@ -129,9 +171,12 @@ def run_analysis(ticker):
                 "model_name": "Most Advance stock_AI",
                 "swing": swing_data,
                 "intraday": intraday_data,
+                "history": history,
                 "details": {
                     "tech_score": stock_data['technical_score'],
-                    "fund_score": stock_data['fundamental_score']
+                    "fund_score": stock_data['fundamental_score'],
+                    "adx": round(float(adx), 2) if not np.isnan(adx) else 0.0,
+                    "rvol": round(float(rvol), 2)
                 }
             }
 

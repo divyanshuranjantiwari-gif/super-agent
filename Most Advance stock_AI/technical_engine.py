@@ -48,6 +48,13 @@ class TechnicalEngine:
             
             # ATR
             df['atr'] = ta.volatility.AverageTrueRange(high=df['High'], low=df['Low'], close=df['Close'], window=14).average_true_range()
+            
+            # ADX
+            df['adx'] = ta.trend.ADXIndicator(high=df['High'], low=df['Low'], close=df['Close'], window=14).adx()
+            
+            # RVOL
+            df['vol_avg'] = df['Volume'].rolling(window=20).mean()
+            df['rvol'] = df['Volume'] / df['vol_avg'].replace(0, 1)
 
             # Get latest values
             latest = df.iloc[-1]
@@ -58,7 +65,9 @@ class TechnicalEngine:
                 "above_sma_50": latest['Close'] > latest['sma_50'] if not pd.isna(latest['sma_50']) else False,
                 "above_sma_200": latest['Close'] > latest['sma_200'] if not pd.isna(latest['sma_200']) else False,
                 "bb_position": (latest['Close'] - latest['bb_low']) / (latest['bb_high'] - latest['bb_low']) if (latest['bb_high'] - latest['bb_low']) != 0 else 0.5,
-                "atr": latest['atr']
+                "atr": latest['atr'],
+                "adx": latest['adx'],
+                "rvol": latest['rvol']
             }
             
             score = self.calculate_score(signals)
