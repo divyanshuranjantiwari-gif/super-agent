@@ -3,6 +3,7 @@ import os
 import json
 import argparse
 import contextlib
+import numpy as np
 
 # Suppress stdout during imports and processing to keep JSON clean
 @contextlib.contextmanager
