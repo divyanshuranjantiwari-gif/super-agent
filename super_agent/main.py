@@ -158,12 +158,50 @@ def analyze_stock(ticker):
              if final_score > 0: final_score = 0
              
         # 2. RVOL Filter (Institutional Validation)
-        # If Buying, need Volume > 2.0x (Institutional Footprint)
-        # Relaxed slightly to 1.5x for testing, or strict 2.0? Plan said 2.0.
-        # Let's use 1.5 as 2.0 is very strict for Nifty 500 daily.
-        # Or stick to plan: 2.0.
+        # Problem: At 10:00 AM, Volume is only ~10-15% of daily avg.
+        # Solution: Scale threshold based on Market Time (Linear Approx).
+        
+        import datetime
+        import pytz
+        
+        def get_rvol_threshold():
+            try:
+                ist = pytz.timezone('Asia/Kolkata')
+                now = datetime.datetime.now(ist)
+                
+                # Market Hours: 9:15 to 15:30
+                market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+                market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+                
+                if now < market_start: return 1.5 # Pre-market (use full day prev? or strict)
+                if now > market_end: return 1.5 # Post-market (use full day)
+                
+                # During Market
+                total_minutes = (15 * 60) + 30 - ((9 * 60) + 15) # 375 mins
+                elapsed = (now - market_start).total_seconds() / 60
+                
+                ratio = elapsed / total_minutes
+                ratio = max(0.05, min(ratio, 1.0)) # Clamp 5% to 100%
+                
+                # Target: 1.5x of "Expected Volume so far"
+                # But volume curve is front-loaded. A linear ratio underestimates morning volume.
+                # 10:00 AM (45 mins) is 12% time, but maybe 20% volume.
+                # If we use linear: Thresh = 1.5 * 0.12 = 0.18.
+                # If we want 1.5x of 20%: Thresh = 1.5 * 0.20 = 0.3.
+                # Let's add a "Morning Buffer" multiplier (1.5x) to the ratio for early hours?
+                # Simpler: Just use Linear Ratio for now. 1.5 * ratio.
+                # Users complained about 0.10 score. 0.41 (actual) > 0.18 (linear threshold). It passes.
+                
+                return 1.5 * ratio
+                
+            except Exception:
+                return 1.5 # Fallback
+        
+        rvol_threshold = get_rvol_threshold()
+        
         if mode_key == 'swing' and final_score > 0.2: # If Buy
-            if avg_rvol < 1.5: # Using 1.5 for realistic strictness
+            if avg_rvol < rvol_threshold: 
+                # Downgrade
                 final_score = 0.1 # Downgrade to Weak Wait
                 
         return final_score
