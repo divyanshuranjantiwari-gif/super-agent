@@ -9,6 +9,18 @@ import requests
 import io
 import pandas as pd
 
+# Load Meta-ML model (trained on backtest data)
+try:
+    from meta_model import load_meta_model, predict_with_meta
+    META_MODEL = load_meta_model()
+    if META_MODEL:
+        print(f"[Meta-ML] Loaded model (accuracy: {META_MODEL['metrics']['accuracy']*100:.1f}%)")
+    else:
+        print("[Meta-ML] No trained model found — running without ML filter")
+except Exception as e:
+    META_MODEL = None
+    print(f"[Meta-ML] Could not load: {e}")
+
 def get_nifty500():
     try:
         print("Fetching NIFTY 500 list from NSE...")
@@ -275,11 +287,60 @@ def analyze_stock(ticker):
     params_swing = extract_params(results, 'swing', final_signal_swing)
     params_intraday = extract_params(results, 'intraday', final_signal_intraday)
     
+    # --- META-ML MODEL PREDICTION ---
+    # Use the trained meta-model to predict probability of hitting +3% in 5 days
+    ml_confidence = None
+    if META_MODEL is not None:
+        try:
+            # Build trade_data dict matching backtest format
+            def get_model_signal(model_name, mode_key):
+                res = results.get(model_name, {})
+                if "error" in res: return 'WAIT', 0
+                md = res.get(mode_key, {})
+                return md.get('signal', 'WAIT'), md.get('confidence', 0)
+            
+            apex_sig, apex_conf = get_model_signal("Apex Logic", "swing")
+            hfm_sig, hfm_conf = get_model_signal("Hedge Fund Manager", "swing")
+            stockai_sig, stockai_conf = get_model_signal("Most Advance stock_AI", "swing")
+            quant_sig, quant_conf = get_model_signal("Quantitative Development", "swing")
+            
+            # Get ADX/RSI/RVOL/MACD from Apex details (most reliable source)
+            apex_details = results.get("Apex Logic", {}).get("details", {})
+            
+            trade_data = {
+                'apex_signal': apex_sig, 'apex_conf': apex_conf,
+                'hfm_signal': hfm_sig, 'hfm_conf': hfm_conf,
+                'stockai_signal': stockai_sig, 'stockai_conf': stockai_conf,
+                'quant_signal': quant_sig, 'quant_conf': quant_conf,
+                'ensemble_signal': final_signal_swing,
+                'super_score': super_score_swing,
+                'rsi': 50, 'adx': avg_adx, 'rvol': avg_rvol, 'macd_diff': 0,
+                'above_sma50': 1 if apex_details.get('trend_score', 0) >= 0 else 0,
+                'above_sma200': 1 if apex_details.get('trend_score', 0) > 0 else 0,
+                'above_ema20': 1 if apex_details.get('mom_score', 0) >= 0 else 0,
+                'above_vwap': 1 if apex_details.get('vol_boost', 0) >= 0 else 0,
+            }
+            
+            ml_confidence = predict_with_meta(META_MODEL, trade_data)
+            
+            # Use ML confidence to enhance/degrade signal
+            if ml_confidence is not None:
+                if ml_confidence > 0.7 and "BUY" in final_signal_swing:
+                    # High ML confidence — upgrade signal text
+                    if final_signal_swing == "BUY":
+                        final_signal_swing = "STRONG BUY"
+                elif ml_confidence < 0.3 and "BUY" in final_signal_swing:
+                    # Low ML confidence — downgrade
+                    final_signal_swing = "WAIT"
+        except Exception as e:
+            ml_confidence = None
+    
     # Construct Result Objects
     swing_res = {
         "ticker": ticker,
-        "final_signal": ("💎 " + final_signal_swing) if is_supreme_swing else final_signal_swing,
+        "final_signal": ("[SUPREME] " + final_signal_swing) if is_supreme_swing else final_signal_swing,
         "super_score": super_score_swing,
+        "ml_confidence": round(ml_confidence, 4) if ml_confidence is not None else None,
         "entry": params_swing['entry'],
         "target": params_swing['target'],
         "sl": params_swing['sl'],
@@ -289,8 +350,9 @@ def analyze_stock(ticker):
     
     intraday_res = {
         "ticker": ticker,
-        "final_signal": ("💎 " + final_signal_intraday) if is_supreme_intraday else final_signal_intraday,
+        "final_signal": ("[SUPREME] " + final_signal_intraday) if is_supreme_intraday else final_signal_intraday,
         "super_score": super_score_intraday,
+        "ml_confidence": round(ml_confidence, 4) if ml_confidence is not None else None,
         "entry": params_intraday['entry'],
         "target": params_intraday['target'],
         "sl": params_intraday['sl'],
