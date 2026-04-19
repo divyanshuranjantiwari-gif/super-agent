@@ -24,17 +24,48 @@ def _generate_single_report(results, output_file, report_type):
         signal = res['final_signal']
         score = res['super_score']
         
+        ml_conf = res.get('ml_confidence', None)
+        
         # Color coding
         row_class = ""
         signal_color = "#ffc107" # Yellow
-        if signal == "BUY":
+        if "STRONG BUY" in signal:
+            row_class = "buy-row"
+            signal_color = "#00ff88"
+        elif "BUY" in signal:
             row_class = "buy-row"
             signal_color = "#28a745" # Green
-        elif signal == "SELL":
+        elif "STRONG SELL" in signal:
+            row_class = "sell-row"
+            signal_color = "#ff4500"
+        elif "SELL" in signal:
             row_class = "sell-row"
             signal_color = "#dc3545" # Red
         else:
             row_class = "wait-row"
+        
+        # ML Confidence styling
+        if ml_conf is not None:
+            ml_pct = ml_conf * 100
+            if ml_pct >= 70:
+                ml_color = "#00ff88"  # Bright green
+                ml_label = "HIGH"
+            elif ml_pct >= 50:
+                ml_color = "#ffd700"  # Gold
+                ml_label = "MED"
+            elif ml_pct >= 30:
+                ml_color = "#ff8c00"  # Orange
+                ml_label = "LOW"
+            else:
+                ml_color = "#dc3545"  # Red
+                ml_label = "WEAK"
+            ml_html = f'''<div style="color: {ml_color}; font-weight: bold; font-size: 1.2em;">{ml_pct:.0f}%</div>
+                <div style="font-size: 0.75em; color: {ml_color}; opacity: 0.7;">{ml_label}</div>
+                <div style="background: #333; border-radius: 4px; height: 4px; margin-top: 4px;">
+                    <div style="background: {ml_color}; width: {ml_pct:.0f}%; height: 100%; border-radius: 4px;"></div>
+                </div>'''
+        else:
+            ml_html = '<span style="color: #555;">N/A</span>'
             
         # Individual Model Details
         # Models now contain nested info, but main.py should have flattened it for display or passed the relevant part
@@ -74,6 +105,7 @@ def _generate_single_report(results, output_file, report_type):
             <td class="ticker">{ticker}</td>
             <td class="signal" style="color: {signal_color}; font-weight: bold;">{signal}</td>
             <td class="score">{score:.2f}</td>
+            <td style="text-align: center; min-width: 80px;">{ml_html}</td>
             <td class="trade-params">
                 <div><strong>Entry:</strong> {entry:.2f}</div>
                 <div><strong>Target:</strong> {target:.2f}</div>
@@ -202,9 +234,10 @@ def _generate_single_report(results, output_file, report_type):
                         <th>Ticker</th>
                         <th>Final Signal</th>
                         <th>Super Score</th>
+                        <th style="text-align: center;">ML Confidence</th>
                         <th>Trade Setup</th>
                         <th>Model Breakdown</th>
-                        <th>Apex Signal 🏆</th>
+                        <th>Apex Signal</th>
                     </tr>
                 </thead>
                 <tbody>
