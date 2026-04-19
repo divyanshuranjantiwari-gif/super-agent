@@ -61,25 +61,17 @@ def add_technical_indicators(df):
     df['Vol_MA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Shock'] = np.where(df['Volume'] > 1.5 * df['Vol_MA20'], 1, 0)
     
-    # 5. RSI Divergence (Simplified)
-    # Bullish Divergence: Price Lower Low, RSI Higher Low
-    # We compare current low vs low 5 days ago (window)
+    # 6. RSI Divergence (Simplified Detection)
+    # Bullish: Price makes lower low but RSI makes higher low
+    # Bearish: Price makes higher high but RSI makes lower high
+    price_low_5 = df['Low'].rolling(window=5).min()
+    rsi_low_5 = df['RSI'].rolling(window=5).min()
+    price_low_10 = df['Low'].rolling(window=10).min()
+    rsi_low_10 = df['RSI'].rolling(window=10).min()
     
-    # Calculate local lows (rolling min)
-    df['Price_Low_5'] = df['Low'].rolling(window=5).min()
-    df['RSI_Low_5'] = df['RSI'].rolling(window=5).min()
-    
-    # Logic:
-    # If Current Low == Price_Low_5 (we are at a local low)
-    # AND Current Low < Previous Local Low (Lower Low)
-    # AND Current RSI > Previous Local RSI (Higher Low)
-    
-    # This is hard to vectorize perfectly without complex logic.
-    # We will use a simpler proxy for the AI model:
-    # Just feed the raw RSI and Price trends.
-    # But for the "Signal" layer, we can try to flag it.
-    
-    df['RSI_Divergence'] = 0
+    # Bullish divergence: current 5-day low < 10-day low (lower low) but current 5-day RSI > 10-day RSI (higher low)
+    bullish_div = (price_low_5 < price_low_10.shift(5)) & (rsi_low_5 > rsi_low_10.shift(5))
+    df['RSI_Divergence'] = bullish_div.astype(int)
     
     # 6. Day of Week
     df['Day_of_Week'] = df.index.dayofweek

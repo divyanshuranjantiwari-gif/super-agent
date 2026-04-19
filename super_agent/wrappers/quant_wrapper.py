@@ -34,13 +34,15 @@ def run_analysis(ticker):
             import yfinance as yf
             df_full = yf.download(ticker, period="1y", interval="1d", progress=False)
             
-            # Helper for analysis
+            # === FIX #6: Fetch fundamentals and sentiment ONCE, outside the loop ===
+            f_score, _ = get_fundamental_score(ticker)
+            s_score, _ = get_sentiment_score(ticker)
+            s_score_norm = (s_score + 1) * 5  # Normalize -1..1 to 0..10
+            
             def analyze_slice(df_slice):
-                f_score, _ = get_fundamental_score(ticker) # Fund score static
+                """Runs technical analysis on a data slice. 
+                Reuses cached fundamental & sentiment scores."""
                 t_score, t_signals = get_technical_indicators(ticker, df=df_slice)
-                s_score, _ = get_sentiment_score(ticker) # Sent score static (hard to get history easily without API cost/complexity)
-                
-                s_score_norm = (s_score + 1) * 5
                 
                 fin_score = (f_score * 0.3) + (t_score * 0.5) + (s_score_norm * 0.2)
                 
@@ -52,7 +54,7 @@ def run_analysis(ticker):
                 return {
                     "score": fin_score,
                     "signal": action,
-                    "tech_signals": t_signals, # Contains ADX/RVOL
+                    "tech_signals": t_signals,
                     "fund_score": f_score,
                     "tech_score": t_score,
                     "sent_score": s_score
@@ -61,14 +63,15 @@ def run_analysis(ticker):
             # Generate History
             history = []
             for i in range(3):
-                if len(df_full) < 200 + i: break # Ensure enough data
+                if len(df_full) < 200 + i: break
                 
                 slice_df = df_full if i == 0 else df_full[:-i]
                 res = analyze_slice(slice_df)
                 
-                # Confidence scaling
-                conf = res['score'] / 10.0
-                if res['score'] < 3: conf = (3 - res['score']) / 3.0
+                # FIX #17: Consistent confidence scaling (0-1 range)
+                conf = res['score'] / 10.0  # Score is 0-10, so conf is 0-1
+                if res['signal'] == 'SELL':
+                    conf = max(0.3, (10 - res['score']) / 10.0)
                 
                 history.append({
                     "date": str(slice_df.index[-1]) if hasattr(slice_df.index, 'date') else f"T-{i}",
@@ -81,8 +84,6 @@ def run_analysis(ticker):
             current_res = analyze_slice(df_full)
             tech_s = current_res['tech_signals']
             final_score = current_res['score']
-            
-            # ... (Rest of logic using current_res) ...
             
             intraday_signal_check = False
             if final_score > 6:
@@ -99,7 +100,7 @@ def run_analysis(ticker):
             
             if final_score < 3:
                 base_action = "SELL"
-                base_conf = (3 - final_score) / 3.0
+                base_conf = max(0.3, (10 - final_score) / 10.0)
             
             close_price = tech_s.get('Close', 0)
             atr = tech_s.get('ATR', close_price * 0.02)

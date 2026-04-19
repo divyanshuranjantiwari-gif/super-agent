@@ -42,23 +42,23 @@ def run_analysis(ticker):
             if df is None or df.empty:
                 return {"error": "No data"}
             
+            # FIX #8: Fetch fundamentals ONCE (static data, doesn't change per slice)
+            fund_data_cached = fund_engine.analyze(ticker)
+            
             # Helper for analysis
             def analyze_slice(df_slice):
                 # Data check
                 if df_slice is None or df_slice.empty: return None
                 
-                # Fundamental Analysis (Static)
-                fund_data = fund_engine.analyze(ticker)
-                
-                # Technical Analysis (Dynamic)
+                # Technical Analysis (Dynamic — changes per slice)
                 tech_data = tech_engine.analyze(ticker, df_slice)
                 
                 stock_data = {
                     "symbol": ticker,
                     "technical_score": tech_data.get('score', 0),
-                    "fundamental_score": fund_data.get('score', 0),
+                    "fundamental_score": fund_data_cached.get('score', 0),
                     "technical_signals": tech_data.get('signals', {}),
-                    "fundamental_metrics": fund_data.get('metrics', {}),
+                    "fundamental_metrics": fund_data_cached.get('metrics', {}),
                     "latest_price": tech_data.get('latest_price', 0)
                 }
                 

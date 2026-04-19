@@ -6,25 +6,36 @@ import numpy as np
 def train_predict_model(df):
     """
     Trains XGBoost model and predicts next day's close.
+    FIX #4: Uses all meaningful features instead of just 5.
     Returns: predicted_price, confidence_score (R2)
     """
-    # Define features to use
-    # Must match what is generated in features.py
-    feature_cols = ['RSI', 'ATR_Normalized', 'Vol_Shock', 'RS_Momentum', 'Day_of_Week']
+    # FIX #4: Expanded feature set — use all indicators that features.py calculates
+    feature_cols = [
+        'RSI', 
+        'MACD_12_26_9',    # MACD line value
+        'MACDh_12_26_9',   # MACD histogram (momentum direction)
+        'ATR_Normalized',  # Volatility relative to price
+        'Vol_Shock',       # Institutional volume spike
+        'EMA_20',          # Short-term trend level
+        'ADX',             # Trend strength
+        'RVOL',            # Relative volume
+        'RS_Momentum',     # Relative strength vs benchmark
+    ]
     
-    # Check if columns exist
+    # Check which features actually exist in the data
     available_features = [f for f in feature_cols if f in df.columns]
     
-    if not available_features or len(df) < 60:
+    if len(available_features) < 3 or len(df) < 60:
         return None, 0
     
     # Prepare Target: Next Day Close
+    df = df.copy()  # Avoid SettingWithCopyWarning
     df['Target'] = df['Close'].shift(-1)
     
     # Drop NaNs created by shifting and indicators
-    data = df.dropna()
+    data = df.dropna(subset=available_features + ['Target'])
     
-    if data.empty:
+    if len(data) < 40:
         return None, 0
     
     X = data[available_features]
@@ -35,26 +46,33 @@ def train_predict_model(df):
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
+    if len(X_train) < 20 or len(X_test) < 5:
+        return None, 0
+    
     # Initialize and Train Model
-    model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.1, max_depth=3)
+    model = xgb.XGBRegressor(
+        objective='reg:squarederror', 
+        n_estimators=150, 
+        learning_rate=0.08, 
+        max_depth=4,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        verbosity=0
+    )
     model.fit(X_train, y_train)
     
     # Evaluate
-    score = model.score(X_test, y_test) # R2 Score
+    score = model.score(X_test, y_test)  # R2 Score
     
     # Retrain on full data for final prediction
     model.fit(X, y)
     
-    # Predict for the next day
-    # We use the LAST available row of features (from the original df, which has today's data)
+    # Predict for the next day using today's features
     last_row = df.iloc[[-1]][available_features]
     
-    # Handle case where last row might have NaNs if indicators need future data (unlikely for these indicators)
-    # But if last row has NaNs, we can't predict.
     if last_row.isnull().values.any():
-        # Try previous row? No, we need today's data to predict tomorrow.
-        # If today's data is incomplete, we can't predict.
-        return None, 0
+        # Fill remaining NaNs with column medians as fallback
+        last_row = last_row.fillna(X.median())
         
     predicted_price = model.predict(last_row)[0]
     

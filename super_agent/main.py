@@ -72,17 +72,24 @@ def analyze_stock(ticker):
         "Apex Logic": res_apex
     }
     
-    # --- AGGREGATION LOGIC ---
+    # === SUPER AGENT 4.0 AGGREGATION ===
     
-    # --- AGGREGATION LOGIC (Super Agent 3.0) ---
-    
+    # --- FIX #1: Graduated Signal Normalization ---
+    # BUY and STRONG BUY are no longer identical.
     def normalize_signal(signal):
-        s = signal.upper()
-        if "STRONG BUY" in s or "STRONG_BUY" in s: return 1.0
-        if "STRONG SELL" in s or "STRONG_SELL" in s: return -1.0
-        if "BUY" in s: return 1.0
-        if "SELL" in s: return -1.0
-        return 0.0
+        s = signal.upper().replace("_", " ")
+        if "STRONG BUY" in s: return 1.0
+        if "STRONG SELL" in s: return -1.0
+        if "BUY" in s: return 0.7       # Weaker than STRONG BUY
+        if "SELL" in s: return -0.7      # Weaker than STRONG SELL
+        return 0.0  # WAIT / HOLD
+    
+    # Helper: Get direction only (+1, -1, 0) for consensus check
+    def get_direction(signal):
+        s = signal.upper().replace("_", " ")
+        if "BUY" in s: return 1
+        if "SELL" in s: return -1
+        return 0
         
     # 1. Global Metrics (ADX, RVOL)
     adx_vals = []
@@ -96,33 +103,28 @@ def analyze_stock(ticker):
     avg_adx = sum(adx_vals) / len(adx_vals) if adx_vals else 0
     avg_rvol = sum(rvol_vals) / len(rvol_vals) if rvol_vals else 0
     
-    def calculate_persistence_score(res, mode_key):
+    # --- FIX #10: Model-Specific Persistence Weights ---
+    MODEL_WEIGHTS = {
+        "Hedge Fund Manager":       [0.40, 0.35, 0.25],   # Slow (institutional)
+        "Most Advance stock_AI":    [0.50, 0.30, 0.20],   # Balanced
+        "Quantitative Development": [0.50, 0.30, 0.20],   # Balanced
+        "Apex Logic":               [0.60, 0.25, 0.15],   # Fast (price action)
+    }
+    
+    def calculate_persistence_score(res, mode_key, model_name):
         if "error" in res: return 0
         
-        # New History-Based Logic
         history = res.get('history', [])
         
-        # If no history (fallback), use current signal with penalty
+        # Fallback: no history available
         if not history:
             current = res.get(mode_key, {})
             sig = current.get('signal', 'WAIT')
             conf = current.get('confidence', 0)
             return normalize_signal(sig) * conf * 0.5
-            
-        # Weights: T=0.5, T-1=0.3, T-2=0.2
-        weights = [0.5, 0.3, 0.2]
+        
+        weights = MODEL_WEIGHTS.get(model_name, [0.5, 0.3, 0.2])
         score = 0
-        
-        # History is ordered [T, T-1, T-2] (as appended in loop 0..2)
-        # Wait, wrapper loop was: for i in 0..2: history.append(T-i)
-        # So history[0] is T, history[1] is T-1...
-        # Let's verify wrapper logic. 
-        # "history.append({date: T-i...})"
-        # Yes, index 0 is T.
-        
-        # However, for MODE specific signals (Swing vs Intraday), wrappers might calculate generic signal history?
-        # Wrappers return generic 'signal' in history. This maps to Swing usually.
-        # Intraday might differ, but for persistence we track the core Trend.
         
         for i, h_item in enumerate(history):
             if i >= 3: break
@@ -132,6 +134,30 @@ def analyze_stock(ticker):
             
         return score
 
+    # --- FIX #12: Model Consensus Gate ---
+    def check_consensus(results, mode_key):
+        """
+        Returns True if models generally agree, False if there's a conflict.
+        A conflict = one model says BUY and another says SELL.
+        """
+        directions = []
+        for model_name, res in results.items():
+            if "error" in res: continue
+            current = res.get(mode_key, {})
+            sig = current.get('signal', 'WAIT')
+            d = get_direction(sig)
+            if d != 0:  # Only count non-WAIT models
+                directions.append(d)
+        
+        if not directions:
+            return True  # All WAIT = no conflict
+        
+        has_buy = any(d > 0 for d in directions)
+        has_sell = any(d < 0 for d in directions)
+        
+        # Conflict: at least one model says BUY and another says SELL
+        return not (has_buy and has_sell)
+
     def calculate_super_score(results, mode_key):
         total_score = 0
         valid_models = 0
@@ -139,27 +165,29 @@ def analyze_stock(ticker):
         for model_name, res in results.items():
             if "error" in res: continue
             
-            # INCLUDE Apex in 3.0
-            # previous: if model_name == "Apex Logic": continue 
-            
-            p_score = calculate_persistence_score(res, mode_key)
+            p_score = calculate_persistence_score(res, mode_key, model_name)
             total_score += p_score
             valid_models += 1
             
         final_score = total_score / valid_models if valid_models > 0 else 0
         
-        # --- FILTERS (The "Iron-Clad" Logic) ---
+        # --- FILTERS ---
         
-        # 1. ADX Filter (Trend Strength)
-        # If ADX < 25, Market is Choppy. Kill "Trends".
-        # Only applies to Swing. Intraday might scalp chop.
-        if mode_key == 'swing' and avg_adx < 25:
-             # Veto Buy Signals in Chop
-             if final_score > 0: final_score = 0
-             
-        # 2. RVOL Filter REMOVED (User Request)
-        # We rely on ADX and Price Action Persistence only.
-        pass
+        # FIX #9: Graduated ADX Filter (Not hard kill)
+        # ADX < 20: Hard veto (truly choppy)
+        # ADX 20-25: 50% penalty (borderline)
+        # ADX > 25: No penalty (trending)
+        if mode_key == 'swing':
+            if avg_adx < 20:
+                if final_score > 0: final_score = 0  # Hard veto
+            elif avg_adx < 25:
+                if final_score > 0: final_score *= 0.5  # 50% penalty
+        
+        # FIX #12: Consensus Gate
+        # If models disagree on direction, force WAIT
+        if not check_consensus(results, mode_key):
+            if abs(final_score) < 0.6:  # Only override if not a very strong signal
+                final_score *= 0.3  # Heavy penalty for disagreement
                 
         return final_score
 
@@ -168,7 +196,7 @@ def analyze_stock(ticker):
     
     # Determine Final Signals
     def get_final_signal(score):
-        if score >= 0.5: return "STRONG BUY" # High Persistence
+        if score >= 0.5: return "STRONG BUY"
         if score > 0.15: return "BUY"
         if score <= -0.5: return "STRONG SELL"
         if score < -0.15: return "SELL"
@@ -177,33 +205,64 @@ def analyze_stock(ticker):
     final_signal_swing = get_final_signal(super_score_swing)
     final_signal_intraday = get_final_signal(super_score_intraday)
     
-    # Extract Trade Params (Prioritize Quant > StockAI > HFM)
+    # --- SUPREME TIER Classification ---
+    # A stock gets "SUPREME" badge ONLY if ALL of:
+    # 1. All 3 history days aligned as BUY for all working models
+    # 2. All working models agree on BUY direction
+    # 3. ADX > 25
+    # 4. Super Score >= 0.6
+    def check_supreme(results, mode_key, super_score):
+        if super_score < 0.6: return False
+        if avg_adx < 25: return False
+        
+        for model_name, res in results.items():
+            if "error" in res: continue
+            
+            # Check current signal is BUY
+            current = res.get(mode_key, {})
+            if get_direction(current.get('signal', 'WAIT')) != 1:
+                return False
+            
+            # Check all history days are BUY
+            history = res.get('history', [])
+            for h in history:
+                if get_direction(h.get('signal', 'WAIT')) != 1:
+                    return False
+        
+        return True
+    
+    is_supreme_swing = check_supreme(results, 'swing', super_score_swing)
+    is_supreme_intraday = check_supreme(results, 'intraday', super_score_intraday)
+    
+    # Extract Trade Params
     def extract_params(model_results, mode_key, final_sig):
-        # Default
         params = {"entry": 0, "target": 0, "sl": 0}
         
-        # Priority list
+        # Priority: Apex > Quant > StockAI > HFM for trade params
         priority = ["Apex Logic", "Quantitative Development", "Most Advance stock_AI", "Hedge Fund Manager"]
         
-        # Try to find a model that agrees with the final signal
+        # Normalize final_sig for comparison
+        final_sig_norm = final_sig.upper().replace("_", " ")
+        
         for name in priority:
             res = model_results.get(name, {})
             if "error" in res: continue
             
             mode_data = res.get(mode_key, {})
-            if mode_data.get('signal') == final_sig and final_sig != "WAIT":
-                params['entry'] = mode_data.get('entry', 0)
-                params['target'] = mode_data.get('target', 0)
-                params['sl'] = mode_data.get('sl', 0)
-                return params
-            # Loose match (BUY matches STRONG BUY)
-            if final_sig in mode_data.get('signal', '') and final_sig != "WAIT":
-                 params['entry'] = mode_data.get('entry', 0)
-                 params['target'] = mode_data.get('target', 0)
-                 params['sl'] = mode_data.get('sl', 0)
-                 return params
+            model_sig = mode_data.get('signal', 'WAIT').upper().replace("_", " ")
+            
+            # Exact or loose match (BUY matches STRONG BUY direction)
+            if final_sig_norm != "WAIT":
+                final_dir = get_direction(final_sig_norm)
+                model_dir = get_direction(model_sig)
+                
+                if final_dir == model_dir and final_dir != 0:
+                    params['entry'] = mode_data.get('entry', 0)
+                    params['target'] = mode_data.get('target', 0)
+                    params['sl'] = mode_data.get('sl', 0)
+                    return params
         
-        # Fallback: Just take from Quant or Apex if available
+        # Fallback: take from Apex
         res = model_results.get("Apex Logic", {})
         if "error" not in res:
             mode_data = res.get(mode_key, {})
@@ -219,21 +278,23 @@ def analyze_stock(ticker):
     # Construct Result Objects
     swing_res = {
         "ticker": ticker,
-        "final_signal": final_signal_swing,
+        "final_signal": ("💎 " + final_signal_swing) if is_supreme_swing else final_signal_swing,
         "super_score": super_score_swing,
         "entry": params_swing['entry'],
         "target": params_swing['target'],
         "sl": params_swing['sl'],
+        "is_supreme": is_supreme_swing,
         "models": {k: v.get('swing', {}) for k, v in results.items() if "error" not in v}
     }
     
     intraday_res = {
         "ticker": ticker,
-        "final_signal": final_signal_intraday,
+        "final_signal": ("💎 " + final_signal_intraday) if is_supreme_intraday else final_signal_intraday,
         "super_score": super_score_intraday,
         "entry": params_intraday['entry'],
         "target": params_intraday['target'],
         "sl": params_intraday['sl'],
+        "is_supreme": is_supreme_intraday,
         "models": {k: v.get('intraday', {}) for k, v in results.items() if "error" not in v}
     }
     
@@ -241,7 +302,6 @@ def analyze_stock(ticker):
     for k, v in results.items():
         if "error" in v:
             error_msg = v['error']
-            # Truncate to keep UI sane but show key info
             short_err = f"ERR: {error_msg[:100]}" 
             swing_res['models'][k] = {"signal": short_err, "confidence": 0}
             intraday_res['models'][k] = {"signal": short_err, "confidence": 0}
@@ -249,25 +309,21 @@ def analyze_stock(ticker):
     return swing_res, intraday_res
 
 def main():
-    print("Initializing Super Agent...")
+    print("Initializing Super Agent 4.0...")
     print(f"Wrapper Directory: {WRAPPER_DIR}")
-    
-    # Limit for testing
-    # tickers = ["RELIANCE.NS", "TCS.NS"] 
     
     # Fetch NIFTY 500
     tickers = get_nifty500()
     
     if not tickers:
         print("Fallback to hardcoded list (Critical Error)")
-        tickers = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"] # Minimal fallback
+        tickers = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"]
     
     print(f"Starting analysis for {len(tickers)} stocks...")
     
     swing_results = []
     intraday_results = []
     
-    # Sequential processing to avoid overloading system/API limits
     for i, ticker in enumerate(tickers):
         print(f"[{i+1}/{len(tickers)}] ", end="")
         try:
