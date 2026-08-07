@@ -17,6 +17,8 @@ def _generate_single_report(results, output_file, report_type):
     # Sort results by Super Score (descending)
     sorted_results = sorted(results, key=lambda x: x['super_score'], reverse=True)
     
+    global_regime = sorted_results[0].get('market_regime', 'UNKNOWN') if sorted_results else 'UNKNOWN'
+    
     # Generate Table Rows
     table_rows = ""
     for res in sorted_results:
@@ -75,10 +77,14 @@ def _generate_single_report(results, output_file, report_type):
         stock_ai = res['models']['Most Advance stock_AI']
         quant = res['models']['Quantitative Development']
         
-        # Trade Params
+        # Trade Params & New Features
         entry = res.get('entry', 0)
         target = res.get('target', 0)
         sl = res.get('sl', 0)
+        pos_size = res.get('position_size_pct', 0.0)
+        sector_trend = res.get('sector_trend', 'NEUTRAL')
+        
+        sector_color = "#28a745" if sector_trend == 'UP' else "#dc3545" if sector_trend == 'DOWN' else "#aaa"
         
         # Helper for color
         def get_color(sig):
@@ -101,13 +107,17 @@ def _generate_single_report(results, output_file, report_type):
         elif "SELL" in apex_sig: apex_style = "color: #dc3545; font-weight: bold;"
         
         table_rows += f"""
-        <tr class="{row_class}">
-            <td class="ticker">{ticker}</td>
+        <tr class="data-row {row_class}">
+            <td class="ticker">
+                {ticker}
+                <div style="font-size: 0.7em; color: {sector_color}; margin-top: 6px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">SEC: {sector_trend}</div>
+            </td>
             <td class="signal" style="color: {signal_color}; font-weight: bold;">{signal}</td>
             <td class="score">{score:.2f}</td>
             <td style="text-align: center; min-width: 80px;">{ml_html}</td>
             <td class="trade-params">
-                <div><strong>Entry:</strong> {entry:.2f}</div>
+                <div><strong>Size:</strong> <span style="color: #00d4ff; font-weight: bold;">{pos_size:.1f}%</span></div>
+                <div style="margin-top: 3px;"><strong>Entry:</strong> {entry:.2f}</div>
                 <div><strong>Target:</strong> {target:.2f}</div>
                 <div><strong>SL:</strong> {sl:.2f}</div>
             </td>
@@ -124,107 +134,141 @@ def _generate_single_report(results, output_file, report_type):
         """
 
     html_content = f"""
-    <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Super Agent Alpha - {report_type}</title>
+        <title>Tattva TradeAI 5.0</title>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
         <style>
             body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background-color: #121212;
-                color: #e0e0e0;
+                font-family: 'Outfit', sans-serif;
+                background-color: #050a15;
+                background-image: radial-gradient(circle at 15% 50%, rgba(0, 229, 255, 0.08), transparent 25%),
+                                  radial-gradient(circle at 85% 30%, rgba(0, 255, 136, 0.05), transparent 25%);
+                color: #e0e6ed;
                 margin: 0;
-                padding: 20px;
+                padding: 40px;
             }}
             .container {{
-                max_width: 1400px;
+                max-width: 1400px;
                 margin: 0 auto;
-                background-color: #1e1e1e;
-                padding: 20px;
-                border-radius: 10px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             }}
             h1 {{
                 text-align: center;
-                color: #00d4ff;
+                color: #ffffff;
+                font-weight: 800;
+                font-size: 2.8em;
                 margin-bottom: 5px;
+                letter-spacing: 1px;
+                text-shadow: 0 0 20px rgba(0, 229, 255, 0.3);
             }}
             .subtitle {{
                 text-align: center;
-                color: #888;
-                margin-bottom: 30px;
+                color: #00E5FF;
                 font-size: 1.2em;
                 font-weight: 300;
+                margin-bottom: 30px;
+                letter-spacing: 3px;
+                text-transform: uppercase;
             }}
             .report-tag {{
                 display: inline-block;
-                padding: 5px 15px;
+                padding: 6px 16px;
+                background: rgba(0, 229, 255, 0.1);
+                color: #00E5FF;
+                border: 1px solid rgba(0, 229, 255, 0.3);
                 border-radius: 20px;
-                background-color: #333;
-                color: #fff;
                 font-size: 0.9em;
-                margin-bottom: 20px;
+                font-weight: 600;
+                letter-spacing: 1px;
             }}
             table {{
                 width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-            }}
-            th, td {{
-                padding: 15px;
-                text-align: left;
-                border-bottom: 1px solid #333;
+                border-collapse: separate;
+                border-spacing: 0 10px;
+                margin-top: 30px;
             }}
             th {{
-                background-color: #2c2c2c;
-                color: #fff;
-                font-weight: 600;
+                background: transparent;
+                color: #8892b0;
+                text-transform: uppercase;
+                font-size: 0.85em;
+                letter-spacing: 1px;
+                padding: 12px 20px;
+                text-align: left;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
             }}
-            tr:hover {{
-                background-color: #252525;
+            tr.data-row {{
+                background: rgba(255, 255, 255, 0.02);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             }}
-            .buy-row {{
-                border-left: 4px solid #28a745;
+            tr.data-row:hover {{
+                background: rgba(255, 255, 255, 0.05);
+                transform: translateY(-2px);
+                box-shadow: 0 8px 25px rgba(0,229,255,0.1);
             }}
-            .sell-row {{
-                border-left: 4px solid #dc3545;
+            td {{
+                padding: 20px;
+                vertical-align: middle;
+                border-top: 1px solid rgba(255,255,255,0.05);
+                border-bottom: 1px solid rgba(255,255,255,0.05);
             }}
-            .wait-row {{
+            td:first-child {{
+                border-left: 1px solid rgba(255,255,255,0.05);
+                border-top-left-radius: 12px;
+                border-bottom-left-radius: 12px;
+            }}
+            td:last-child {{
+                border-right: 1px solid rgba(255,255,255,0.05);
+                border-top-right-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }}
+            .buy-row td:first-child {{
+                border-left: 4px solid #00ff88;
+            }}
+            .sell-row td:first-child {{
+                border-left: 4px solid #ff4500;
+            }}
+            .wait-row td:first-child {{
                 border-left: 4px solid #ffc107;
             }}
             .ticker {{
-                font-size: 1.1em;
-                font-weight: bold;
-                color: #fff;
+                font-size: 1.25em;
+                font-weight: 800;
+                color: #ffffff;
+                letter-spacing: 0.5px;
             }}
             .score {{
-                font-family: 'Courier New', monospace;
-                font-weight: bold;
+                font-weight: 600;
+                font-size: 1.1em;
             }}
             .trade-params {{
-                font-size: 0.9em;
-                color: #ddd;
+                font-size: 0.95em;
+                color: #a8b2d1;
+                line-height: 1.6;
             }}
             .model-detail {{
                 font-size: 0.85em;
-                color: #aaa;
-                margin-bottom: 2px;
+                color: #8892b0;
+                margin-bottom: 4px;
             }}
             .footer {{
                 text-align: center;
-                margin-top: 40px;
-                color: #555;
-                font-size: 0.8em;
+                margin-top: 50px;
+                color: #4a5568;
+                font-size: 0.85em;
+                letter-spacing: 1px;
             }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>SUPER AGENT ALPHA</h1>
-            <div class="subtitle">Unified Intelligence System</div>
-            <div style="text-align:center;">
+            <h1>TATTVA TradeAI</h1>
+            <div class="subtitle">Institutional Intelligence System 5.0</div>
+            <div style="text-align:center; margin-bottom: 20px;">
+                <span class="report-tag" style="background: rgba(0, 229, 255, 0.15); border-color: #00E5FF; color: #00E5FF; margin-right: 15px; box-shadow: 0 0 10px rgba(0,229,255,0.2);">REGIME: {global_regime}</span>
                 <span class="report-tag">{report_type.upper()} REPORT</span>
             </div>
             

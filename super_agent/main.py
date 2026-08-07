@@ -4,6 +4,9 @@ import json
 import subprocess
 import concurrent.futures
 from reporting import generate_dual_reports
+from regime_detector import detect_market_regime
+from sector_mapper import get_sector_trend
+from risk_manager import calculate_position_size
 
 import requests
 import io
@@ -21,12 +24,16 @@ except Exception as e:
     META_MODEL = None
     print(f"[Meta-ML] Could not load: {e}")
 
+print("Detecting Macro Market Regime...")
+GLOBAL_REGIME = detect_market_regime()
+print(f"Regime: {GLOBAL_REGIME['regime']} (NIFTY: {GLOBAL_REGIME['nifty_trend']}, VIX: {GLOBAL_REGIME['vix_level']:.2f})")
+
 def get_nifty500():
     try:
         print("Fetching NIFTY 500 list from NSE...")
         url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             csv_content = response.content.decode('utf-8')
             df = pd.read_csv(io.StringIO(csv_content))
@@ -208,8 +215,16 @@ def analyze_stock(ticker):
     
     # Determine Final Signals
     def get_final_signal(score):
-        if score >= 0.5: return "STRONG BUY"
-        if score > 0.15: return "BUY"
+        # Apply regime penalty
+        req_buy_score = 0.15
+        req_strong_buy = 0.50
+        
+        if GLOBAL_REGIME['regime'] in ['BEAR', 'HIGH_VOL']:
+            req_buy_score = 0.35      # Stricter entry in bad markets
+            req_strong_buy = 0.75
+            
+        if score >= req_strong_buy: return "STRONG BUY"
+        if score > req_buy_score: return "BUY"
         if score <= -0.5: return "STRONG SELL"
         if score < -0.15: return "SELL"
         return "WAIT"
@@ -333,7 +348,15 @@ def analyze_stock(ticker):
                     # Low ML confidence — downgrade
                     final_signal_swing = "WAIT"
         except Exception as e:
+            print(f"[Meta-ML] Prediction failed for {ticker}: {e}")
             ml_confidence = None
+            
+    # Calculate Risk Management (Position Sizing)
+    pos_size_swing = calculate_position_size(ml_confidence, super_score_swing, GLOBAL_REGIME['regime'])
+    pos_size_intraday = calculate_position_size(ml_confidence, super_score_intraday, GLOBAL_REGIME['regime'])
+    
+    # Get Sector Confluence
+    sector_trend = get_sector_trend(ticker)
     
     # Construct Result Objects
     swing_res = {
@@ -341,6 +364,9 @@ def analyze_stock(ticker):
         "final_signal": ("[SUPREME] " + final_signal_swing) if is_supreme_swing else final_signal_swing,
         "super_score": super_score_swing,
         "ml_confidence": round(ml_confidence, 4) if ml_confidence is not None else None,
+        "position_size_pct": pos_size_swing,
+        "market_regime": GLOBAL_REGIME['regime'],
+        "sector_trend": sector_trend,
         "entry": params_swing['entry'],
         "target": params_swing['target'],
         "sl": params_swing['sl'],
@@ -353,6 +379,9 @@ def analyze_stock(ticker):
         "final_signal": ("[SUPREME] " + final_signal_intraday) if is_supreme_intraday else final_signal_intraday,
         "super_score": super_score_intraday,
         "ml_confidence": round(ml_confidence, 4) if ml_confidence is not None else None,
+        "position_size_pct": pos_size_intraday,
+        "market_regime": GLOBAL_REGIME['regime'],
+        "sector_trend": sector_trend,
         "entry": params_intraday['entry'],
         "target": params_intraday['target'],
         "sl": params_intraday['sl'],

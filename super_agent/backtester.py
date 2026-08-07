@@ -12,13 +12,17 @@ Logic:
 """
 
 import sys
-import os
-import json
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import ta
-import yfinance as yf
+import warnings
 from datetime import datetime
+import os
+import csv
+from sector_mapper import SECTOR_MAP
+import ta
+
+warnings.filterwarnings('ignore')
 
 # --- INDICATOR CALCULATIONS (Mirrors what wrappers compute) ---
 
@@ -332,6 +336,27 @@ def run_backtest(tickers=None, lookback_days=60, target_pct=0.03, max_holding=5)
         'Supreme': {'correct': 0, 'wrong': 0, 'total': 0},
     }
     
+    print("  Fetching global macro history (NIFTY & VIX)...")
+    macro_df = yf.download(['^NSEI', '^INDIAVIX'], period="2y", interval="1d", progress=False)['Close']
+    if not macro_df.empty and '^NSEI' in macro_df.columns:
+        macro_df['SMA_50'] = macro_df['^NSEI'].rolling(window=50).mean()
+    
+    # Pre-fetch sector histories
+    print("  Fetching sector histories...")
+    sector_histories = {}
+    unique_sectors = set(SECTOR_MAP.values())
+    for sec in unique_sectors:
+        sec_data = yf.download(sec, period="2y", interval="1d", progress=False)['Close']
+        if not sec_data.empty:
+            if isinstance(sec_data, pd.DataFrame):
+                sec_series = sec_data[sec]
+            else:
+                sec_series = sec_data
+            sector_histories[sec] = pd.DataFrame({
+                'Close': sec_series,
+                'SMA_20': sec_series.rolling(window=20).mean()
+            })
+            
     all_trades = []
     
     for i, ticker in enumerate(tickers):
@@ -422,6 +447,51 @@ def run_backtest(tickers=None, lookback_days=60, target_pct=0.03, max_holding=5)
                         model_results['Supreme']['correct'] += 1
                     else:
                         model_results['Supreme']['wrong'] += 1
+                        
+                # -------------------------------------------------------------
+                # POINT-IN-TIME MACRO & SECTOR LOOKUP
+                # -------------------------------------------------------------
+                trade_date = df.index[idx]
+                
+                # 1. Macro Regime Lookup
+                regime_val = 0 # Default: Choppy
+                vix_level = 15.0
+                try:
+                    # Find closest date in macro_df on or before trade_date
+                    past_macro = macro_df.loc[:trade_date]
+                    if not past_macro.empty:
+                        m_row = past_macro.iloc[-1]
+                        vix_level = m_row.get('^INDIAVIX', 15.0)
+                        nifty_close = m_row.get('^NSEI', 0)
+                        nifty_sma50 = m_row.get('SMA_50', 0)
+                        
+                        nifty_trend = "UP" if nifty_close > nifty_sma50 else "DOWN"
+                        
+                        if vix_level >= 25:
+                            regime_val = -1 # High Vol
+                        elif nifty_trend == "DOWN" and vix_level >= 18:
+                            regime_val = -1 # Bear
+                        elif nifty_trend == "UP" and vix_level < 25:
+                            regime_val = 1 # Bull
+                        else:
+                            regime_val = 0 # Choppy
+                except Exception:
+                    pass
+                    
+                # 2. Sector Trend Lookup
+                sector_val = 0 # Default: Neutral
+                sec_index = SECTOR_MAP.get(ticker)
+                if sec_index and sec_index in sector_histories:
+                    try:
+                        past_sec = sector_histories[sec_index].loc[:trade_date]
+                        if not past_sec.empty:
+                            s_row = past_sec.iloc[-1]
+                            s_close = s_row['Close']
+                            s_sma20 = s_row['SMA_20']
+                            if pd.notna(s_close) and pd.notna(s_sma20):
+                                sector_val = 1 if s_close > s_sma20 else -1
+                    except Exception:
+                        pass
                 
                 # Store trade data for meta-model training
                 all_trades.append({
@@ -447,10 +517,13 @@ def run_backtest(tickers=None, lookback_days=60, target_pct=0.03, max_holding=5)
                     'ensemble_signal': final_sig,
                     'super_score': super_score,
                     'is_supreme': is_supreme,
+                    'regime_val': regime_val,
+                    'sector_val': sector_val,
+                    'vix_level': vix_level,
                     'fwd_5d_return': fwd_5d,
-                    'fwd_5d_max_return': fwd_5d_max,
-                    'hit_target': hit_target,
-                    'went_down': went_down,
+                    'fwd_5d_max': fwd_5d_max,
+                    'hit_target': 1 if hit_target else 0,
+                    'went_down': went_down
                 })
             
             acc = f"{stock_correct}/{stock_total} ({stock_correct/stock_total*100:.0f}%)" if stock_total > 0 else "No trades"

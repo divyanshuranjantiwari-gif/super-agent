@@ -16,17 +16,19 @@ import json
 import pickle
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import TimeSeriesSplit
+import pickle
+import os
+import xgboost as xgb
+from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 import warnings
 warnings.filterwarnings('ignore')
 
-# Try to import lightgbm, fall back to sklearn GBM
+# Try to import lightgbm, but we will primary use XGBoost now
 try:
     import lightgbm as lgb
     USE_LGB = True
 except ImportError:
-    from sklearn.ensemble import GradientBoostingClassifier
     USE_LGB = False
 
 MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -78,6 +80,22 @@ def prepare_features(df):
     features['above_ema20'] = pd.to_numeric(df['above_ema20'], errors='coerce').fillna(0)
     features['above_vwap'] = pd.to_numeric(df['above_vwap'], errors='coerce').fillna(0)
     
+    # Phase 2 New Features
+    if 'regime_val' in df.columns:
+        features['regime_val'] = pd.to_numeric(df['regime_val'], errors='coerce').fillna(0)
+    else:
+        features['regime_val'] = 0
+        
+    if 'sector_val' in df.columns:
+        features['sector_val'] = pd.to_numeric(df['sector_val'], errors='coerce').fillna(0)
+    else:
+        features['sector_val'] = 0
+        
+    if 'vix_level' in df.columns:
+        features['vix_level'] = pd.to_numeric(df['vix_level'], errors='coerce').fillna(15.0)
+    else:
+        features['vix_level'] = 15.0
+    
     # Derived: Model agreement
     sigs = features[['apex_sig', 'hfm_sig', 'stockai_sig', 'quant_sig']]
     features['model_agreement'] = sigs.apply(lambda row: (row > 0).sum() - (row < 0).sum(), axis=1)
@@ -127,29 +145,16 @@ def train_meta_model():
         X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
         
-        if USE_LGB:
-            model = lgb.LGBMClassifier(
-                n_estimators=200,
-                learning_rate=0.05,
-                max_depth=5,
-                num_leaves=31,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                min_child_samples=20,
-                reg_alpha=0.1,
-                reg_lambda=0.1,
-                verbosity=-1,
-                random_state=42
-            )
-        else:
-            model = GradientBoostingClassifier(
-                n_estimators=200,
-                learning_rate=0.05,
-                max_depth=5,
-                subsample=0.8,
-                random_state=42
-            )
-        
+        model = xgb.XGBClassifier(
+            n_estimators=100,
+            learning_rate=0.05,
+            max_depth=5,
+            subsample=0.8,
+            objective='binary:logistic',
+            eval_metric='logloss',
+            use_label_encoder=False,
+            random_state=42
+        )
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
         
@@ -171,34 +176,46 @@ def train_meta_model():
     print(f"  AVG:    Acc={avg_acc:.3f} | Precision={avg_prec:.3f} | Recall={avg_rec:.3f} | F1={avg_f1:.3f}")
     print(f"  {'='*55}")
     
-    # Train final model on all data
-    print("\n  Training final model on all data...")
+    # Train final model on all data with Deep Grid Search
+    print("\n  Running XGBoost Deep Grid Search for hyperparameter tuning...")
     
-    if USE_LGB:
-        final_model = lgb.LGBMClassifier(
-            n_estimators=200, learning_rate=0.05, max_depth=5,
-            num_leaves=31, subsample=0.8, colsample_bytree=0.8,
-            min_child_samples=20, reg_alpha=0.1, reg_lambda=0.1,
-            verbosity=-1, random_state=42
-        )
-    else:
-        final_model = GradientBoostingClassifier(
-            n_estimators=200, learning_rate=0.05, max_depth=5,
-            subsample=0.8, random_state=42
-        )
+    xgb_base = xgb.XGBClassifier(
+        objective='binary:logistic',
+        eval_metric='logloss',
+        use_label_encoder=False,
+        random_state=42
+    )
     
-    final_model.fit(X, y)
+    param_grid = {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [3, 5, 7],
+        'learning_rate': [0.01, 0.05, 0.1],
+        'subsample': [0.7, 0.8, 1.0],
+        'colsample_bytree': [0.7, 0.8, 1.0]
+    }
+    
+    # We use TimeSeriesSplit for grid search cross-validation to prevent lookahead
+    grid_search = GridSearchCV(
+        estimator=xgb_base,
+        param_grid=param_grid,
+        scoring='precision',  # We care most about precision for a trading bot
+        cv=tscv,
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    grid_search.fit(X, y)
+    
+    print(f"  Best Parameters: {grid_search.best_params_}")
+    final_model = grid_search.best_estimator_
     
     # Feature importance
-    if USE_LGB:
-        importance = pd.Series(final_model.feature_importances_, index=X.columns)
-    else:
-        importance = pd.Series(final_model.feature_importances_, index=X.columns)
+    importance = pd.Series(final_model.feature_importances_, index=X.columns)
     
     print("\n  Feature Importance (Top 10):")
     for feat, imp in importance.sort_values(ascending=False).head(10).items():
-        bar = '#' * int(imp / importance.max() * 30)
-        print(f"    {feat:20s} {bar} ({imp:.0f})")
+        bar = '#' * int(imp / (importance.max() + 1e-9) * 30)
+        print(f"    {feat:20s} {bar} ({imp:.3f})")
     
     # Save model
     model_data = {
