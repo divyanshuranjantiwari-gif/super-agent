@@ -32,6 +32,7 @@ jobs:
 
     - name: Run Super Agent
       run: |
+        python super_agent/meta_model.py
         python super_agent/main.py
 
     - name: Setup Pages
