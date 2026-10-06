@@ -15,7 +15,7 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def run_analysis(ticker):
+def run_analysis(ticker, stock_data=None):
     # Relative path: ../../Most Advance stock_AI
     WRAPPER_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(os.path.dirname(WRAPPER_DIR))
@@ -38,7 +38,10 @@ def run_analysis(ticker):
             strat_engine = StrategyEngine()
 
             # Fetch Data
-            df = data_engine.fetch_ohlcv(ticker)
+            if stock_data is not None:
+                df = stock_data.copy()
+            else:
+                df = data_engine.fetch_ohlcv(ticker)
             if df is None or df.empty:
                 return {"error": "No data"}
             
@@ -182,6 +185,19 @@ def run_analysis(ticker):
 
     except Exception as e:
         return {"error": str(e)}
+
+def analyze(ticker, stock_data=None):
+    """Direct API for Super Agent — no subprocess needed."""
+    try:
+        if stock_data is None:
+            import yfinance as yf
+            stock_data = yf.download(ticker, period='1y', interval='1d', progress=False)
+            if isinstance(stock_data.columns, pd.MultiIndex):
+                stock_data.columns = stock_data.columns.get_level_values(0)
+        
+        return run_analysis(ticker, stock_data)
+    except Exception as e:
+        return {"error": str(e), "details": {}}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

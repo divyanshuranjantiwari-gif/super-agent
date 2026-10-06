@@ -63,11 +63,14 @@ def calculate_adx(high, low, close, period=14):
     adx_smooth = adx.ewm(alpha = 1/period).mean()
     return adx_smooth
 
-def run_analysis(ticker):
+def run_analysis(ticker, stock_data=None):
     try:
         with suppress_stdout():
             # Fetch Data (1 Year for robust EMA 200)
-            df = yf.download(ticker, period="1y", interval="1d", progress=False)
+            if stock_data is not None:
+                df = stock_data.copy()
+            else:
+                df = yf.download(ticker, period="1y", interval="1d", progress=False)
             
             if df is None or df.empty or len(df) < 200:
                 return {"error": "Insufficient data"}
@@ -233,6 +236,19 @@ def run_analysis(ticker):
 
     except Exception as e:
         return {"error": str(e)}
+
+def analyze(ticker, stock_data=None):
+    """Direct API for Super Agent — no subprocess needed."""
+    try:
+        if stock_data is None:
+            import yfinance as yf
+            stock_data = yf.download(ticker, period='1y', interval='1d', progress=False)
+            if isinstance(stock_data.columns, pd.MultiIndex):
+                stock_data.columns = stock_data.columns.get_level_values(0)
+        
+        return run_analysis(ticker, stock_data)
+    except Exception as e:
+        return {"error": str(e), "details": {}}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

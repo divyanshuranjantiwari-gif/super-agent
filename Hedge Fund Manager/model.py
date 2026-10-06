@@ -30,7 +30,7 @@ def train_predict_model(df):
     
     # Prepare Target: Next Day Close
     df = df.copy()  # Avoid SettingWithCopyWarning
-    df['Target'] = df['Close'].shift(-1)
+    df['Target'] = (df['Close'].shift(-1) / df['Close']) - 1  # Predict % return
     
     # Drop NaNs created by shifting and indicators
     data = df.dropna(subset=available_features + ['Target'])
@@ -74,6 +74,8 @@ def train_predict_model(df):
         # Fill remaining NaNs with column medians as fallback
         last_row = last_row.fillna(X.median())
         
-    predicted_price = model.predict(last_row)[0]
+    predicted_return = model.predict(last_row)[0]
+    current_price = df['Close'].iloc[-1]
+    predicted_price = current_price * (1 + predicted_return)
     
     return predicted_price, score

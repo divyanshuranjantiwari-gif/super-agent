@@ -1,7 +1,8 @@
 import os
 import sys
 import json
-import subprocess
+from data_fetcher import fetch_all_data, get_stock_data
+from wrappers import apex_wrapper, hfm_wrapper, stock_ai_wrapper, quant_wrapper
 import concurrent.futures
 from reporting import generate_dual_reports
 from regime_detector import detect_market_regime
@@ -48,35 +49,23 @@ def get_nifty500():
 
 WRAPPER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wrappers")
 
-def run_wrapper(wrapper_name, ticker):
-    wrapper_path = os.path.join(WRAPPER_DIR, wrapper_name)
+def run_wrapper_direct(wrapper_module, ticker, stock_data=None):
+    """Call wrapper analysis function directly (no subprocess)."""
     try:
-        result = subprocess.run(
-            [sys.executable, wrapper_path, "--ticker", ticker],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        output = result.stdout.strip()
-        # Find the last line which should be the JSON
-        lines = output.split('\n')
-        json_line = lines[-1]
-        return json.loads(json_line)
-    except subprocess.CalledProcessError as e:
-        # Capture stderr for debugging
-        return {"error": f"Subprocess Error: {e.stderr}", "details": {"raw_output": e.stdout}}
+        result = wrapper_module.analyze(ticker, stock_data)
+        return result if result else {"error": "No result returned"}
     except Exception as e:
-        return {"error": str(e), "details": {"raw_output": ""}}
+        return {"error": str(e), "details": {}}
 
-def analyze_stock(ticker):
+def analyze_stock(ticker, stock_data=None):
     print(f"Analyzing {ticker}...", end="\r")
     
-    # Run models in parallel for this stock
+    # Run models in parallel for this stock (using direct imports, not subprocess)
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        future_hfm = executor.submit(run_wrapper, "hfm_wrapper.py", ticker)
-        future_stock_ai = executor.submit(run_wrapper, "stock_ai_wrapper.py", ticker)
-        future_quant = executor.submit(run_wrapper, "quant_wrapper.py", ticker)
-        future_apex = executor.submit(run_wrapper, "apex_wrapper.py", ticker)
+        future_hfm = executor.submit(run_wrapper_direct, hfm_wrapper, ticker, stock_data)
+        future_stock_ai = executor.submit(run_wrapper_direct, stock_ai_wrapper, ticker, stock_data)
+        future_quant = executor.submit(run_wrapper_direct, quant_wrapper, ticker, stock_data)
+        future_apex = executor.submit(run_wrapper_direct, apex_wrapper, ticker, stock_data)
         
         res_hfm = future_hfm.result()
         res_stock_ai = future_stock_ai.result()
@@ -296,6 +285,20 @@ def analyze_stock(ticker):
             params['entry'] = mode_data.get('entry', 0)
             params['target'] = mode_data.get('target', 0)
             params['sl'] = mode_data.get('sl', 0)
+        # Dynamic trailing stop calculation
+        if params.get('entry', 0) > 0 and params.get('sl', 0) > 0:
+            risk = params['entry'] - params['sl']
+            if risk > 0:
+                # Adjust reward based on trend strength
+                if avg_adx > 35 and avg_rvol > 2.0:
+                    params['target'] = params['entry'] + (3.0 * risk)  # 1:3 RR
+                elif avg_adx > 25:
+                    params['target'] = params['entry'] + (2.0 * risk)  # 1:2 RR
+                else:
+                    params['target'] = params['entry'] + (1.5 * risk)  # 1:1.5 RR
+                
+                params['trailing_activation'] = params['entry'] + risk
+                params['max_holding_days'] = 5
             
         return params
 
@@ -397,7 +400,67 @@ def analyze_stock(ticker):
             swing_res['models'][k] = {"signal": short_err, "confidence": 0}
             intraday_res['models'][k] = {"signal": short_err, "confidence": 0}
 
+    # Apply Sniper Filter for high-precision swing signals
+    swing_res = apply_swing_sniper_filter(swing_res, results, avg_adx, avg_rvol)
+
     return swing_res, intraday_res
+
+def apply_swing_sniper_filter(swing_res, results, avg_adx, avg_rvol):
+    """Ultra-strict filter for swing trades. Sacrifice frequency for >90% precision.
+    Only passes signals where ALL conditions align."""
+    
+    # Only filter BUY signals (let SELL/WAIT pass through)
+    if 'BUY' not in swing_res.get('final_signal', ''):
+        return swing_res
+    
+    reasons_to_reject = []
+    
+    # 1. ADX must show strong trend
+    if avg_adx < 25:
+        reasons_to_reject.append(f'ADX too low ({avg_adx:.1f} < 25)')
+    
+    # 2. Volume confirmation needed
+    if avg_rvol < 1.3:
+        reasons_to_reject.append(f'RVOL too low ({avg_rvol:.1f} < 1.3)')
+    
+    # 3. Sector must be bullish
+    if swing_res.get('sector_trend') == 'DOWN':
+        reasons_to_reject.append('Sector trend is DOWN')
+    
+    # 4. Market regime check
+    if swing_res.get('market_regime') in ['BEAR', 'HIGH_VOL']:
+        reasons_to_reject.append(f'Bad regime: {swing_res["market_regime"]}')
+    
+    # 5. Model consensus — count how many models say BUY
+    buy_count = 0
+    working_models = 0
+    for model_name, res in results.items():
+        if 'error' in res:
+            continue
+        working_models += 1
+        swing_data = res.get('swing', {})
+        sig = swing_data.get('signal', 'WAIT').upper()
+        if 'BUY' in sig:
+            buy_count += 1
+    
+    if working_models > 0 and buy_count < max(2, int(working_models * 0.6)):
+        reasons_to_reject.append(f'Weak consensus ({buy_count}/{working_models} models agree)')
+    
+    # 6. ML confidence check (if available)
+    ml_conf = swing_res.get('ml_confidence')
+    if ml_conf is not None and ml_conf < 0.55:
+        reasons_to_reject.append(f'Low ML confidence ({ml_conf:.2f} < 0.55)')
+    
+    # If ANY reason to reject, downgrade to WATCH
+    if reasons_to_reject:
+        swing_res['final_signal'] = 'WATCH'
+        swing_res['sniper_filtered'] = True
+        swing_res['filter_reasons'] = reasons_to_reject
+    else:
+        swing_res['sniper_filtered'] = False
+        swing_res['sniper_approved'] = True
+    
+    return swing_res
 
 def main():
     print("Initializing Super Agent 4.0...")
@@ -412,13 +475,22 @@ def main():
     
     print(f"Starting analysis for {len(tickers)} stocks...")
     
+    # Centralized data fetch — download ALL tickers in one batch
+    print("Fetching market data for all tickers (single batch)...")
+    data_cache = fetch_all_data(tickers)
+    print(f"Data available for {len(data_cache)} tickers")
+    
     swing_results = []
     intraday_results = []
     
     for i, ticker in enumerate(tickers):
         print(f"[{i+1}/{len(tickers)}] ", end="")
         try:
-            s_res, i_res = analyze_stock(ticker)
+            stock_data = get_stock_data(ticker)
+            if stock_data is None:
+                print(f"Skipping {ticker} (no data)")
+                continue
+            s_res, i_res = analyze_stock(ticker, stock_data)
             swing_results.append(s_res)
             intraday_results.append(i_res)
         except Exception as e:

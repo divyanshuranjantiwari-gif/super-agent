@@ -83,8 +83,51 @@ def compute_all_indicators(df):
     df['Fwd_3D'] = df['Close'].shift(-3) / df['Close'] - 1
     df['Fwd_5D'] = df['Close'].shift(-5) / df['Close'] - 1
     df['Fwd_5D_Max'] = df['High'].rolling(window=5).max().shift(-5) / df['Close'] - 1
+    df['Fwd_5D_Min'] = df['Low'].rolling(window=5).min().shift(-1) / df['Close'] - 1
     
     return df
+
+
+def label_trade_outcome(df, idx, sl_multiplier=1.5, target_pct=0.03, max_days=5):
+    """Check day-by-day if SL or Target hit first.
+    
+    Uses ATR-based stop loss and percentage-based target.
+    Returns: (outcome, days_held)
+        outcome: 'WIN', 'LOSS', or 'TIMEOUT'
+        days_held: number of days position was held
+    """
+    entry_price = df.iloc[idx]['Close']
+    atr = df.iloc[idx]['ATR']
+    
+    if pd.isna(atr) or atr <= 0:
+        atr = entry_price * 0.02  # Fallback: 2% of price
+    
+    sl_price = entry_price - (sl_multiplier * atr)
+    target_price = entry_price * (1 + target_pct)
+    
+    for d in range(1, max_days + 1):
+        future_idx = idx + d
+        if future_idx >= len(df):
+            break
+        
+        day_low = df.iloc[future_idx]['Low']
+        day_high = df.iloc[future_idx]['High']
+        
+        # Check SL FIRST (conservative — assume worst case intraday order)
+        if day_low <= sl_price:
+            return 'LOSS', d
+        
+        # Then check target
+        if day_high >= target_price:
+            return 'WIN', d
+    
+    # Time stop — neither hit within max_days
+    final_idx = min(idx + max_days, len(df) - 1)
+    final_price = df.iloc[final_idx]['Close']
+    if final_price > entry_price:
+        return 'WIN', max_days  # Small win
+    else:
+        return 'LOSS', max_days  # Time stop loss
 
 
 # --- MODEL SIGNAL SIMULATORS ---
@@ -390,11 +433,14 @@ def run_backtest(tickers=None, lookback_days=60, target_pct=0.03, max_holding=5)
                 if pd.isna(fwd_5d) or pd.isna(fwd_5d_max):
                     continue
                 
-                # Did the stock hit target in the next 5 days?
-                # We use max high in next 5 days vs close
-                hit_target = fwd_5d_max >= target_pct
-                # Did it go down instead?
-                went_down = fwd_5d < -target_pct
+                # --- SL-Aware Trade Labeling ---
+                outcome, days_held = label_trade_outcome(df, idx, sl_multiplier=1.5, target_pct=target_pct, max_days=max_holding)
+                hit_target = (outcome == 'WIN')
+                went_down = (outcome == 'LOSS')
+                
+                # Keep old metrics for reference
+                fwd_5d_max_val = fwd_5d_max if not pd.isna(fwd_5d_max) else 0
+                fwd_5d_val = fwd_5d if not pd.isna(fwd_5d) else 0
                 
                 # Run ensemble
                 final_sig, super_score, is_supreme, model_signals = simulate_ensemble(row)
@@ -522,7 +568,9 @@ def run_backtest(tickers=None, lookback_days=60, target_pct=0.03, max_holding=5)
                     'vix_level': vix_level,
                     'fwd_5d_return': fwd_5d,
                     'fwd_5d_max': fwd_5d_max,
-                    'hit_target': 1 if hit_target else 0,
+                    'outcome': outcome,
+                    'days_held': days_held,
+                    'hit_target': 1 if outcome == 'WIN' else 0,
                     'went_down': went_down
                 })
             

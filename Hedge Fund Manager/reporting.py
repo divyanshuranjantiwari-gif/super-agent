@@ -10,7 +10,7 @@ def generate_html_report(signals):
     # Filter for BUY/STRONG_BUY
     buy_signals = [s for s in signals if "BUY" in s['Signal']]
     # Sort by Confidence desc, then Upside desc
-    buy_signals.sort(key=lambda x: (x['Confidence'], x['Upside_Pct']), reverse=True)
+    buy_signals.sort(key=lambda x: (x['Confidence'], x.get('Upside_Pct', 0)), reverse=True)
     
     top_picks = buy_signals[:3]
     
@@ -70,7 +70,7 @@ def generate_html_report(signals):
                     </div>
                     <div class="metric-row">
                         <span class="metric-label">Predicted Upside</span>
-                        <span class="metric-value positive">{{ pick.Upside_Pct }}%</span>
+                        <span class="metric-value positive">{{ pick.get('Upside_Pct', 0) }}%</span>
                     </div>
                     <div class="metric-row">
                         <span class="metric-label">Current Price</span>
@@ -86,7 +86,7 @@ def generate_html_report(signals):
                     </div>
                     <div class="metric-row">
                         <span class="metric-label">Sentiment</span>
-                        <span class="metric-value">{{ pick.Sentiment_Score }}</span>
+                        <span class="metric-value">{{ pick.get('Sentiment_Score', 0) }}</span>
                     </div>
                 </div>
                 {% endfor %}
@@ -113,10 +113,10 @@ def generate_html_report(signals):
                         {{ signal.Signal.replace('_', ' ') }}
                     </td>
                     <td>{{ signal.Confidence }}%</td>
-                    <td class="{% if signal.Upside_Pct > 0 %}positive{% else %}negative{% endif %}">{{ signal.Upside_Pct }}%</td>
+                    <td class="{% if signal.get('Upside_Pct', 0) > 0 %}positive{% else %}negative{% endif %}">{{ signal.get('Upside_Pct', 0) }}%</td>
                     <td>{{ signal.Current_Price }}</td>
                     <td>{{ signal.Predicted_Price }}</td>
-                    <td>{{ signal.Sentiment_Score }}</td>
+                    <td>{{ signal.get('Sentiment_Score', 0) }}</td>
                 </tr>
                 {% endfor %}
             </table>

@@ -15,7 +15,7 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def run_analysis(ticker):
+def run_analysis(ticker, stock_data=None):
     # Relative path: ../../Quantitative Development
     WRAPPER_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(os.path.dirname(WRAPPER_DIR))
@@ -31,8 +31,11 @@ def run_analysis(ticker):
             from sentiment import get_sentiment_score
 
             # Fetch Data Manually Once
-            import yfinance as yf
-            df_full = yf.download(ticker, period="1y", interval="1d", progress=False)
+            if stock_data is not None:
+                df_full = stock_data.copy()
+            else:
+                import yfinance as yf
+                df_full = yf.download(ticker, period="1y", interval="1d", progress=False)
             
             # === FIX #6: Fetch fundamentals and sentiment ONCE, outside the loop ===
             f_score, _ = get_fundamental_score(ticker)
@@ -172,6 +175,19 @@ def run_analysis(ticker):
 
     except Exception as e:
         return {"error": str(e)}
+
+def analyze(ticker, stock_data=None):
+    """Direct API for Super Agent — no subprocess needed."""
+    try:
+        if stock_data is None:
+            import yfinance as yf
+            stock_data = yf.download(ticker, period='1y', interval='1d', progress=False)
+            if isinstance(stock_data.columns, pd.MultiIndex):
+                stock_data.columns = stock_data.columns.get_level_values(0)
+        
+        return run_analysis(ticker, stock_data)
+    except Exception as e:
+        return {"error": str(e), "details": {}}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

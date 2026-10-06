@@ -74,7 +74,8 @@ def generate_signal(ticker, current_data, predicted_price, market_mood, option_d
     # SELL Logic:
     elif not has_alpha and not institutional_buying and not short_term_trend_up:
         signal = "SELL"
-        confidence = 50 + alpha_contribution + vwap_contribution + ema_contribution + abs(ml_contribution)
+        ml_sell_contribution = 10 if ml_bearish else (-10 if ml_bullish else 0)
+        confidence = 50 + alpha_contribution + vwap_contribution + ema_contribution + ml_sell_contribution
         if alpha < -0.2 and confidence >= 80:
             signal = "STRONG SELL"  # FIX #11: Consistent format
             

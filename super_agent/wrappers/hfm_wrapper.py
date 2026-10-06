@@ -16,7 +16,7 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def run_analysis(ticker):
+def run_analysis(ticker, stock_data=None):
     # Add model directory to path
     # Relative path: ../../Hedge Fund Manager
     WRAPPER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,15 +42,18 @@ def run_analysis(ticker):
                  nifty_data = nifty_data["^NSEI"]
 
             # Analyze Ticker
-            hist_data = get_historical_data([ticker], period="2y")
-            
-            if isinstance(hist_data.columns, pd.MultiIndex):
-                if ticker not in hist_data.columns.levels[0]:
-                    return {"error": "No data"}
-                df = hist_data[ticker].copy()
+            if stock_data is not None:
+                df = stock_data.copy()
             else:
-                if hist_data.empty: return {"error": "No data"}
-                df = hist_data.copy()
+                hist_data = get_historical_data([ticker], period="2y")
+                
+                if isinstance(hist_data.columns, pd.MultiIndex):
+                    if ticker not in hist_data.columns.levels[0]:
+                        return {"error": "No data"}
+                    df = hist_data[ticker].copy()
+                else:
+                    if hist_data.empty: return {"error": "No data"}
+                    df = hist_data.copy()
             
             if df.empty:
                 return {"error": "Empty data"}
@@ -176,6 +179,19 @@ def run_analysis(ticker):
     except Exception as e:
         import traceback
         return {"error": f"{str(e)} | {traceback.format_exc()}"}
+
+def analyze(ticker, stock_data=None):
+    """Direct API for Super Agent — no subprocess needed."""
+    try:
+        if stock_data is None:
+            import yfinance as yf
+            stock_data = yf.download(ticker, period='1y', interval='1d', progress=False)
+            if isinstance(stock_data.columns, pd.MultiIndex):
+                stock_data.columns = stock_data.columns.get_level_values(0)
+        
+        return run_analysis(ticker, stock_data)
+    except Exception as e:
+        return {"error": str(e), "details": {}}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
