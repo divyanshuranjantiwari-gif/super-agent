@@ -5,16 +5,9 @@ import argparse
 import contextlib
 import numpy as np
 
-# Suppress stdout during imports and processing to keep JSON clean
 @contextlib.contextmanager
 def suppress_stdout():
-    with open(os.devnull, "w") as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
+    yield
 
 def run_analysis(ticker, stock_data=None):
     # Add model directory to path
