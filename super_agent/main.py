@@ -13,6 +13,16 @@ import requests
 import io
 import pandas as pd
 
+def safe_print(*args, **kwargs):
+    try:
+        if getattr(sys.stdout, 'closed', False):
+            sys.stdout = sys.__stdout__
+        print(*args, **kwargs)
+        if hasattr(sys.stdout, 'flush'):
+            sys.stdout.flush()
+    except Exception:
+        pass
+
 # Load Meta-ML model (trained on backtest data)
 try:
     from meta_model import load_meta_model, predict_with_meta
@@ -58,7 +68,7 @@ def run_wrapper_direct(wrapper_module, ticker, stock_data=None):
         return {"error": str(e), "details": {}}
 
 def analyze_stock(ticker, stock_data=None):
-    print(f"Analyzing {ticker}...", end="\r")
+    safe_print(f"Analyzing {ticker}...", end="\r")
     
     # Run models in parallel for this stock (using direct imports, not subprocess)
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -484,17 +494,17 @@ def main():
     intraday_results = []
     
     for i, ticker in enumerate(tickers):
-        print(f"[{i+1}/{len(tickers)}] ", end="")
+        safe_print(f"[{i+1}/{len(tickers)}] ", end="")
         try:
             stock_data = get_stock_data(ticker)
             if stock_data is None:
-                print(f"Skipping {ticker} (no data)")
+                safe_print(f"Skipping {ticker} (no data)")
                 continue
             s_res, i_res = analyze_stock(ticker, stock_data)
             swing_results.append(s_res)
             intraday_results.append(i_res)
         except Exception as e:
-            print(f"Failed to analyze {ticker}: {e}")
+            safe_print(f"Failed to analyze {ticker}: {e}")
             
     print("\nAnalysis Complete. Generating Reports...")
     
