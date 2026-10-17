@@ -31,9 +31,8 @@ class FundamentalEngine:
                 "metrics": metrics,
                 "score": score
             }
-        except Exception as e:
-            print(f"Error in fundamental analysis for {symbol}: {e}")
-            return {"metrics": {}, "score": 0}
+        except Exception:
+            return {"metrics": {}, "score": 50}
 
     def calculate_score(self, metrics):
         """

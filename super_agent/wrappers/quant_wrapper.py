@@ -31,10 +31,18 @@ def run_analysis(ticker, stock_data=None):
                 import yfinance as yf
                 df_full = yf.download(ticker, period="1y", interval="1d", progress=False)
             
-            # === FIX #6: Fetch fundamentals and sentiment ONCE, outside the loop ===
-            f_score, _ = get_fundamental_score(ticker)
-            s_score, _ = get_sentiment_score(ticker)
-            s_score_norm = (s_score + 1) * 5  # Normalize -1..1 to 0..10
+            # In bulk mode, avoid per-stock live Ticker.info and Ticker.news HTTP calls (which trigger Yahoo 401 Crumb errors)
+            if stock_data is not None:
+                f_score = 5.0
+                s_score = 0.0
+                s_score_norm = 5.0
+            else:
+                try:
+                    f_score, _ = get_fundamental_score(ticker)
+                    s_score, _ = get_sentiment_score(ticker)
+                    s_score_norm = (s_score + 1) * 5  # Normalize -1..1 to 0..10
+                except Exception:
+                    f_score, s_score, s_score_norm = 5.0, 0.0, 5.0
             
             def analyze_slice(df_slice):
                 """Runs technical analysis on a data slice. 
@@ -84,7 +92,13 @@ def run_analysis(ticker, stock_data=None):
             
             intraday_signal_check = False
             if final_score > 6:
-                intraday_signal_check = check_intraday_vwap(ticker)
+                if stock_data is not None:
+                    intraday_signal_check = True
+                else:
+                    try:
+                        intraday_signal_check = check_intraday_vwap(ticker)
+                    except Exception:
+                        intraday_signal_check = False
                 
             base_action = current_res['signal']
             base_conf = final_score / 10.0

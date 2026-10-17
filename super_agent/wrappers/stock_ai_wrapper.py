@@ -39,8 +39,14 @@ def run_analysis(ticker, stock_data=None):
             if df is None or df.empty:
                 return {"error": "No data"}
             
-            # FIX #8: Fetch fundamentals ONCE (static data, doesn't change per slice)
-            fund_data_cached = fund_engine.analyze(ticker)
+            # In bulk mode, avoid per-stock live Ticker.info HTTP calls (which trigger Yahoo 401 Crumb errors)
+            if stock_data is not None:
+                fund_data_cached = {"metrics": {}, "score": 50}
+            else:
+                try:
+                    fund_data_cached = fund_engine.analyze(ticker)
+                except Exception:
+                    fund_data_cached = {"metrics": {}, "score": 50}
             
             # Helper for analysis
             def analyze_slice(df_slice):

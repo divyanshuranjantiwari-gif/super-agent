@@ -9,6 +9,12 @@ import numpy as np
 def suppress_stdout():
     yield
 
+_HFM_GLOBAL_CACHE = {
+    'market_mood': None,
+    'option_data': None,
+    'nifty_data': None
+}
+
 def run_analysis(ticker, stock_data=None):
     # Add model directory to path
     # Relative path: ../../Hedge Fund Manager
@@ -27,12 +33,32 @@ def run_analysis(ticker, stock_data=None):
             from strategy import generate_signal
             import pandas as pd
 
-            # Cache/Fetch Data
-            market_mood = get_market_mood()
-            option_data = get_option_chain_analysis("NIFTY")
-            nifty_data = get_historical_data(["^NSEI"], period="2y")
-            if not nifty_data.empty and isinstance(nifty_data.columns, pd.MultiIndex):
-                 nifty_data = nifty_data["^NSEI"]
+            # Cache global macro/benchmark data ONCE across all stocks
+            global _HFM_GLOBAL_CACHE
+            if _HFM_GLOBAL_CACHE['market_mood'] is None:
+                try:
+                    _HFM_GLOBAL_CACHE['market_mood'] = get_market_mood()
+                except Exception:
+                    _HFM_GLOBAL_CACHE['market_mood'] = {"FII_Net": 0, "DII_Net": 0, "Market_Bias": "NEUTRAL"}
+            
+            if _HFM_GLOBAL_CACHE['option_data'] is None:
+                try:
+                    _HFM_GLOBAL_CACHE['option_data'] = get_option_chain_analysis("NIFTY")
+                except Exception:
+                    _HFM_GLOBAL_CACHE['option_data'] = {"PCR": 1.0, "Max_Pain": 0, "Support_Status": "NEUTRAL"}
+                    
+            if _HFM_GLOBAL_CACHE['nifty_data'] is None:
+                try:
+                    nd = get_historical_data(["^NSEI"], period="2y")
+                    if not nd.empty and isinstance(nd.columns, pd.MultiIndex):
+                        nd = nd["^NSEI"]
+                    _HFM_GLOBAL_CACHE['nifty_data'] = nd
+                except Exception:
+                    _HFM_GLOBAL_CACHE['nifty_data'] = pd.DataFrame()
+
+            market_mood = _HFM_GLOBAL_CACHE['market_mood']
+            option_data = _HFM_GLOBAL_CACHE['option_data']
+            nifty_data = _HFM_GLOBAL_CACHE['nifty_data']
 
             # Analyze Ticker
             if stock_data is not None:
@@ -67,8 +93,8 @@ def run_analysis(ticker, stock_data=None):
             if predicted_price is None:
                 predicted_price = df['Close'].iloc[-1]
                 
-            # Sentiment
-            sentiment_score = get_news_sentiment(ticker)
+            # Sentiment (avoid live news HTTP calls in bulk mode)
+            sentiment_score = 0.0 if stock_data is not None else get_news_sentiment(ticker)
             
             # Generate Signal & History
             history = []

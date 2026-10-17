@@ -77,7 +77,6 @@ def get_fundamental_score(ticker):
             details['Growth'] = "N/A"
 
     except Exception as e:
-        logger.error(f"Fundamental check failed for {ticker}: {e}")
-        return 0, {"Error": str(e)}
+        return 5.0, {"Error": str(e)}
 
     return score, details

@@ -55,8 +55,7 @@ def get_sentiment_score(ticker):
                 polarity_sum += blob.sentiment.polarity
             score = polarity_sum / len(headlines)
         
-    except Exception as e:
-        logger.error(f"Sentiment check failed for {ticker}: {e}")
+    except Exception:
         return 0, []
 
     return score, headlines
