@@ -39,9 +39,38 @@ print("Detecting Macro Market Regime...")
 GLOBAL_REGIME = detect_market_regime()
 print(f"Regime: {GLOBAL_REGIME['regime']} (NIFTY: {GLOBAL_REGIME['nifty_trend']}, VIX: {GLOBAL_REGIME['vix_level']:.2f})")
 
-def get_nifty500():
+def get_nse_universe():
+    """
+    Fetches all actively traded equity shares (Series 'EQ') from official NSE EQUITY_L.csv (~2,344 stocks).
+    Falls back to NIFTY 500 if the full equity list is unreachable.
+    """
     try:
-        print("Fetching NIFTY 500 list from NSE...")
+        print("Fetching all actively traded NSE equities from EQUITY_L.csv...")
+        url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=20)
+        if response.status_code == 200:
+            csv_content = response.content.decode('utf-8')
+            df = pd.read_csv(io.StringIO(csv_content))
+            df.columns = [c.strip() for c in df.columns]
+            
+            # Filter regular equity series only ('EQ')
+            if 'SERIES' in df.columns:
+                df = df[df['SERIES'].astype(str).str.strip() == 'EQ']
+            
+            symbols = df['SYMBOL'].astype(str).str.strip().tolist()
+            symbols = [s for s in symbols if s and s != 'nan']
+            tickers = [s + ".NS" for s in symbols]
+            print(f"Discovered {len(tickers)} active regular equity stocks on NSE.")
+            return tickers
+        else:
+            print(f"Failed to fetch EQUITY_L.csv ({response.status_code}), falling back to NIFTY 500...")
+    except Exception as e:
+        print(f"Error fetching EQUITY_L.csv: {e}, falling back to NIFTY 500...")
+
+    # Fallback 1: NIFTY 500
+    try:
+        print("Fetching NIFTY 500 list from NSE as fallback...")
         url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=15)
@@ -50,12 +79,11 @@ def get_nifty500():
             df = pd.read_csv(io.StringIO(csv_content))
             symbols = df['Symbol'].tolist()
             return [s + ".NS" for s in symbols]
-        else:
-            print(f"Failed to fetch NIFTY 500: {response.status_code}")
-            return []
     except Exception as e:
-        print(f"Error fetching NIFTY 500: {e}")
-        return []
+        print(f"Fallback to NIFTY 500 failed: {e}")
+        
+    # Fallback 2: Core large caps
+    return ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"]
 
 WRAPPER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wrappers")
 
@@ -476,29 +504,31 @@ def main():
     print("Initializing Super Agent 4.0...")
     print(f"Wrapper Directory: {WRAPPER_DIR}")
     
-    # Fetch NIFTY 500
-    tickers = get_nifty500()
+    # Fetch all active NSE equities (~2,344 stocks)
+    tickers = get_nse_universe()
     
     if not tickers:
         print("Fallback to hardcoded list (Critical Error)")
         tickers = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"]
     
-    print(f"Starting analysis for {len(tickers)} stocks...")
+    print(f"Starting pipeline for {len(tickers)} active NSE stocks...")
     
-    # Centralized data fetch — download ALL tickers in one batch
-    print("Fetching market data for all tickers (single batch)...")
-    data_cache = fetch_all_data(tickers)
-    print(f"Data available for {len(data_cache)} tickers")
+    # Centralized batch fetch with swing liquidity & tradability safeguards
+    print("Fetching market data and applying swing liquidity pre-filter (Price >= 20, Turnover >= 50L)...")
+    data_cache = fetch_all_data(tickers, apply_liquidity_filter=True)
+    
+    # Scan only the stocks that passed liquidity and quality checks
+    tradable_tickers = [t for t in tickers if t in data_cache]
+    print(f"Analyzing {len(tradable_tickers)} approved tradable swing candidates...")
     
     swing_results = []
     intraday_results = []
     
-    for i, ticker in enumerate(tickers):
-        safe_print(f"[{i+1}/{len(tickers)}] ", end="")
+    for i, ticker in enumerate(tradable_tickers):
+        safe_print(f"[{i+1}/{len(tradable_tickers)}] ", end="")
         try:
             stock_data = get_stock_data(ticker)
             if stock_data is None:
-                safe_print(f"Skipping {ticker} (no data)")
                 continue
             s_res, i_res = analyze_stock(ticker, stock_data)
             swing_results.append(s_res)
